@@ -1,0 +1,316 @@
+
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import { View, Settings, Flashcard, RawCard, AnkiCard } from './types';
+import { DEFAULT_SETTINGS } from './constants';
+import { PREDEFINED_FLASHCARD_DATA } from './data/flashcardData';
+import ConversationView from './components/ConversationView';
+import FlashcardsView from './components/FlashcardsView';
+import SettingsView from './components/SettingsView';
+import AnkiView from './components/AnkiView';
+import { SettingsIcon, BookOpenIcon, MicIcon, CubeIcon } from './components/icons';
+import * as db from './services/db';
+import { ImageOverride } from './services/db';
+import { downloadPixabayLogs, clearPixabayLogs, addPixabayLog, getPixabayLogs } from './services/pixabayLogger';
+
+type CategorizedFlashcards = Record<'phrases' | 'objects', Record<string, Flashcard[]>>;
+
+const App: React.FC = () => {
+  const [view, setView] = useState<View>('conversation');
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [userFlashcards, setUserFlashcards] = useState<Flashcard[]>([]);
+  const [phoneticCache, setPhoneticCache] = useState<Awaited<ReturnType<typeof db.getAllPhonetics>>>([]);
+  const [imageOverrides, setImageOverrides] = useState<ImageOverride[]>([]);
+
+  // Load initial data from DB on component mount
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [savedSettings, savedFlashcards, savedPhonetics, savedImageOverrides] = await Promise.all([
+          db.getSettings(),
+          db.getFlashcards(),
+          db.getAllPhonetics(),
+          db.getAllImageOverrides(),
+        ]);
+        setSettings(savedSettings);
+        setUserFlashcards(savedFlashcards);
+        setPhoneticCache(savedPhonetics);
+        setImageOverrides(savedImageOverrides);
+      } catch (error) {
+        console.error("Fatal: Failed to load initial data from the database.", error);
+        // If loading fails, fall back to default settings to prevent a crash.
+        setSettings(DEFAULT_SETTINGS);
+        setUserFlashcards([]);
+        setPhoneticCache([]);
+        setImageOverrides([]);
+      }
+    };
+    loadData();
+  }, []);
+  
+  // This memoized value will re-calculate ONLY when settings or user flashcards change.
+  // This is a more robust and declarative way to handle data processing.
+  const categorizedFlashcards = useMemo<CategorizedFlashcards>(() => {
+    console.log('[App] Recalculating categorizedFlashcards. imageOverrides count:', imageOverrides.length);
+    
+    if (!settings) {
+      // If settings are not loaded yet, return an empty structure.
+      return { phrases: {}, objects: {} };
+    }
+    
+    const { nativeLanguage, learningLanguage } = settings;
+    const processed: CategorizedFlashcards = { phrases: {}, objects: {} };
+
+    // Helper function to map raw card data to a displayable Flashcard object.
+    const mapCard = (rawCard: RawCard): Flashcard => {
+        const phoneticText = phoneticCache.find(p => p.cardId === rawCard.id)?.phonetic || '';
+        const imageOverride = imageOverrides.find(o => o.cardId === rawCard.id);
+        
+        if (imageOverride) {
+          console.log('[App] Found imageOverride for card:', { cardId: rawCard.id, imageUrl: imageOverride.imageUrl });
+        }
+        
+        return {
+          id: rawCard.id,
+          originalText: rawCard.texts[nativeLanguage] || 'Texto não disponível',
+          translatedText: rawCard.texts[learningLanguage] || 'Tradução não disponível',
+          phoneticText,
+          originalLang: nativeLanguage,
+          translatedLang: learningLanguage,
+          imageUrl: imageOverride?.imageUrl || rawCard.imageUrl, // Use override if available
+        };
+    };
+
+    // Process all predefined phrases and objects.
+    for (const category in PREDEFINED_FLASHCARD_DATA.phrases) {
+      processed.phrases[category] = PREDEFINED_FLASHCARD_DATA.phrases[category].map(rawCard => mapCard(rawCard));
+    }
+    for (const category in PREDEFINED_FLASHCARD_DATA.objects) {
+      processed.objects[category] = PREDEFINED_FLASHCARD_DATA.objects[category].map(rawCard => mapCard(rawCard));
+    }
+
+    // Add user's saved flashcards to a special "Minhas Frases" category.
+    if (userFlashcards.length > 0) {
+      const userCreatedCards = userFlashcards.filter(c => !c.id.startsWith('anki-'));
+      const ankiCards = userFlashcards.filter(c => c.id.startsWith('anki-'));
+
+      if (userCreatedCards.length > 0) {
+        processed.phrases["Minhas Frases"] = userCreatedCards;
+      }
+      if (ankiCards.length > 0) {
+        // Log first 3 Anki cards to verify images are present
+        ankiCards.slice(0, 3).forEach((card, idx) => {
+          console.log(`[App] Anki card ${idx} in processed list:`, {
+            id: card.id,
+            hasImageUrl: !!card.imageUrl,
+            imageUrlPrefix: card.imageUrl?.substring(0, 50),
+            originalText: card.originalText?.substring(0, 30),
+            translatedText: card.translatedText?.substring(0, 30)
+          });
+        });
+        processed.phrases["Importado do Anki"] = ankiCards;
+      }
+    }
+
+    return processed;
+  }, [settings, userFlashcards, phoneticCache, imageOverrides]);
+
+
+  const handleSettingsChange = (newSettings: Settings) => {
+    setSettings(newSettings);
+    db.saveSettings(newSettings);
+  };
+
+  const addFlashcard = useCallback((newCardData: Omit<Flashcard, 'id'>) => {
+    const newCard = { ...newCardData, id: new Date().toISOString() };
+    db.addFlashcard(newCard).then(() => {
+        setUserFlashcards(prev => [...prev, newCard]);
+    });
+  }, []);
+  
+  const handleImageChange = useCallback(async (cardId: string, newImageUrl: string) => {
+    addPixabayLog('info', 'Applying image to card', { cardId, imageUrl: newImageUrl });
+    console.log('[App] handleImageChange called:', { cardId, newImageUrl });
+    
+    // Use an "optimistic update" pattern.
+    // 1. Update the state immediately for a responsive UI.
+    setImageOverrides(prevOverrides => {
+      const overrideExists = prevOverrides.some(o => o.cardId === cardId);
+      const newOverrides = overrideExists
+        ? prevOverrides.map(override =>
+            override.cardId === cardId
+              ? { ...override, imageUrl: newImageUrl }
+              : override
+          )
+        : [...prevOverrides, { cardId, imageUrl: newImageUrl }];
+      
+      console.log('[App] Updated imageOverrides:', { 
+        oldCount: prevOverrides.length, 
+        newCount: newOverrides.length,
+        updatedCard: newOverrides.find(o => o.cardId === cardId)
+      });
+      return newOverrides;
+    });
+
+    // 2. Persist the change to the database in the background.
+    await db.saveImageOverride(cardId, newImageUrl);
+    addPixabayLog('info', 'Image persisted to override store', { cardId });
+  }, []);
+
+  const handleAnkiImport = useCallback(async (ankiCards: AnkiCard[]) => {
+    if (!settings) return;
+
+    console.log('='.repeat(80));
+    console.log('💾 [APP] Processing Anki cards for database');
+    console.log(`📦 Received ${ankiCards.length} cards from parser`);
+    console.log('='.repeat(80));
+    
+    const newFlashcards: Flashcard[] = ankiCards.map((ankiCard, index) => {
+      const flashcard: Flashcard = {
+        id: `anki-${ankiCard.id}-${Date.now()}`, // Ensure unique ID
+        // Match the pattern from ConversationView: original=native, translated=learning
+        originalText: ankiCard.back,      // Native language (back of Anki card)
+        translatedText: ankiCard.front,   // Learning language (front of Anki card)
+        phoneticText: '',
+        originalLang: settings.nativeLanguage,
+        translatedLang: settings.learningLanguage,
+        imageUrl: ankiCard.image
+      };
+      
+      // Log first 3 cards for debugging
+      if (index < 3) {
+        console.log(`🔍 [APP] Card ${index + 1}/${ankiCards.length}:`, {
+          ankiId: ankiCard.id,
+          front: ankiCard.front?.substring(0, 50),
+          back: ankiCard.back?.substring(0, 50),
+          hasImage: !!ankiCard.image,
+          hasAudio: !!ankiCard.audio,
+          imageLength: ankiCard.image?.length || 0,
+          imagePrefix: ankiCard.image?.substring(0, 50)
+        });
+      }
+      
+      return flashcard;
+    });
+
+    await db.bulkAddFlashcards(newFlashcards);
+    console.log('✅ [APP] Anki cards saved to DB');
+    
+    // Reload all flashcards from DB to ensure state is in sync
+    const allFlashcards = await db.getFlashcards();
+    setUserFlashcards(allFlashcards);
+    
+    const ankiCardsFromDb = allFlashcards.filter(c => c.id.startsWith('anki-'));
+    const ankiWithImages = ankiCardsFromDb.filter(c => c.imageUrl).length;
+    
+    console.log('='.repeat(80));
+    console.log('📚 [APP] Flashcards reloaded from database');
+    console.log(`📊 Total flashcards: ${allFlashcards.length}`);
+    console.log(`🎴 Anki cards: ${ankiCardsFromDb.length}`);
+    console.log(`🖼️  Anki cards with images: ${ankiWithImages}`);
+    console.log('='.repeat(80));
+    
+    // Switch to flashcards view to see the new deck
+    setView('flashcards');
+
+  }, [settings]);
+
+
+  const renderView = () => {
+    if (!settings) {
+        return <div className="flex items-center justify-center h-full text-gray-400">Carregando configurações...</div>;
+    }
+    switch (view) {
+      case 'conversation':
+        return <ConversationView settings={settings} addFlashcard={addFlashcard} />;
+      case 'flashcards':
+        // FIX: Corrected typo in function name from 'handleImagechange' to 'handleImageChange'.
+        return <FlashcardsView categorizedFlashcards={categorizedFlashcards} settings={settings} onBack={() => setView('conversation')} onImageChange={handleImageChange} />;
+      case 'settings':
+        return <SettingsView settings={settings} onSettingsChange={handleSettingsChange} onBack={() => setView('conversation')} />;
+      case 'anki':
+        return <AnkiView onImportComplete={handleAnkiImport} onBack={() => setView('conversation')} />;
+      default:
+        return <ConversationView settings={settings} addFlashcard={addFlashcard} />;
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans">
+      <header className="bg-gray-800 shadow-md p-4 flex justify-between items-center">
+        <h1 className="text-xl md:text-2xl font-bold text-white">
+          LinguaFlow <span className="text-cyan-400">AI</span>
+        </h1>
+        <nav className="flex items-center space-x-2 md:space-x-4">
+          <NavButton
+            label="Conversa"
+            icon={<MicIcon className="w-5 h-5" />}
+            isActive={view === 'conversation'}
+            onClick={() => setView('conversation')}
+          />
+          <NavButton
+            label="Flashcards"
+            icon={<BookOpenIcon className="w-5 h-5" />}
+            isActive={view === 'flashcards'}
+            onClick={() => setView('flashcards')}
+          />
+          <NavButton
+            label="Anki"
+            icon={<CubeIcon className="w-5 h-5" />}
+            isActive={view === 'anki'}
+            onClick={() => setView('anki')}
+          />
+          <NavButton
+            label="Ajustes"
+            icon={<SettingsIcon className="w-5 h-5" />}
+            isActive={view === 'settings'}
+            onClick={() => setView('settings')}
+          />
+        </nav>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const logs = getPixabayLogs();
+              console.log('=== PIXABAY LOGS ===');
+              console.log(logs);
+              console.log('=== END LOGS ===');
+              downloadPixabayLogs();
+            }}
+            className="text-sm px-3 py-2 bg-gray-700 rounded-md hover:bg-gray-600 transition-colors"
+            title="Baixa arquivo .txt e exibe logs no console"
+          >
+            Baixar logs Pixabay
+          </button>
+          <button
+            onClick={() => clearPixabayLogs()}
+            className="text-sm px-3 py-2 bg-gray-700 rounded-md hover:bg-gray-600 transition-colors"
+          >
+            Limpar logs
+          </button>
+        </div>
+      </header>
+      <main className="flex-grow overflow-y-auto">
+        {renderView()}
+      </main>
+    </div>
+  );
+};
+
+const NavButton: React.FC<{
+  label: string,
+  icon: React.ReactNode,
+  isActive: boolean,
+  onClick: () => void
+}> = ({ label, icon, isActive, onClick }) => (
+  <button
+    onClick={onClick}
+    className={`flex items-center space-x-2 px-3 py-2 rounded-md transition-colors text-sm font-medium ${isActive
+        ? 'bg-cyan-600 text-white'
+        : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+      }`}
+  >
+    {icon}
+    <span className="hidden md:inline">{label}</span>
+  </button>
+)
+
+export default App;

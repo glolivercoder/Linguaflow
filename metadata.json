@@ -1,0 +1,7 @@
+{
+  "name": "LinguaFlow AI",
+  "description": "A real-time multilingual translation and conversation app powered by Gemini. Practice speaking, get instant feedback, and create flashcards with AI-generated phonetics to accelerate your language learning.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
