@@ -73,6 +73,85 @@ const extractAllAudioSrcs = (html: string): string[] => {
     return matches;
 };
 
+const WORD_REGEX = /\b[A-Za-zÀ-ÖØ-öø-ÿ]+\b/g;
+const PORTUGUESE_ACCENTED_CHAR_REGEX = /[ãõáéíóúâêîôûç]/i;
+const PORTUGUESE_COMMON_WORDS_REGEX = /\b(de|que|é|para|com|não|nao|uma|um|os|as|eu|você|voce|ele|ela|isso|isto|está|esta|ser|ter|foi|são|sao)\b/i;
+const PORTUGUESE_SUFFIX_REGEX = /(ção|ções|são|sao|mente|dade|nhão|nhao|lhão|lhao)/i;
+
+const stripAndClean = (html: string): string => removeInstructionalText(stripHtml(html || '')).trim();
+
+const isLikelyMetadata = (html: string): boolean => {
+    const cleaned = stripHtml(html).trim();
+    if (!cleaned) {
+        return true;
+    }
+    if (/^\d+$/.test(cleaned)) {
+        return true;
+    }
+    if (/^[A-Za-z0-9\-_]+$/.test(cleaned) && cleaned.length <= 4) {
+        return true;
+    }
+    return false;
+};
+
+const scorePortugueseLikelihood = (text: string): number => {
+    if (!text) return 0;
+
+    let score = 0;
+
+    if (PORTUGUESE_ACCENTED_CHAR_REGEX.test(text)) {
+        score += 5;
+    }
+    if (PORTUGUESE_COMMON_WORDS_REGEX.test(text)) {
+        score += 4;
+    }
+    if (PORTUGUESE_SUFFIX_REGEX.test(text)) {
+        score += 3;
+    }
+
+    const wordCount = (text.match(WORD_REGEX) || []).length;
+    score += Math.min(wordCount, 20) / 2;
+
+    return score;
+};
+
+interface CandidateField {
+    idx: number;
+    html: string;
+    cleanedText: string;
+}
+
+const pickBestField = (
+    fields: string[],
+    excludedIdxs: Set<number>,
+    preferPortuguese = false
+): CandidateField | null => {
+    const candidates: (CandidateField & { score: number })[] = [];
+
+    fields.forEach((html, idx) => {
+        if (excludedIdxs.has(idx)) return;
+        if (!html) return;
+        if (isLikelyMetadata(html)) return;
+
+        const cleanedText = stripAndClean(html);
+        if (!cleanedText) return;
+
+        let score = cleanedText.length;
+        const portugueseScore = scorePortugueseLikelihood(cleanedText);
+        score += preferPortuguese ? portugueseScore * 20 : portugueseScore * 5;
+
+        candidates.push({ idx, html, cleanedText, score });
+    });
+
+    if (!candidates.length) {
+        return null;
+    }
+
+    candidates.sort((a, b) => b.score - a.score);
+    const { score: _score, ...best } = candidates[0];
+    return best;
+};
+
 // Helper function to determine MIME type from filename
 const getMimeType = (filename: string): string => {
     const ext = filename.toLowerCase().split('.').pop();
@@ -149,11 +228,32 @@ export const parseAnkiPackage = async (
 
     // Query for models (to understand the note structure)
     onProgress(60, "Processando modelos de cards");
-    const modelsStmt = db.prepare("SELECT models FROM col");
-    modelsStmt.step();
-    const modelsJson = modelsStmt.getAsObject().models as string;
-    modelsStmt.free();
-    const models = JSON.parse(modelsJson);
+    const colStmt = db.prepare("SELECT models, decks FROM col");
+    colStmt.step();
+    const colRow = colStmt.getAsObject();
+    const models = JSON.parse(colRow.models as string);
+    const decks = JSON.parse(colRow.decks as string);
+    colStmt.free();
+
+    const deckNameMap: Record<string, string> = {};
+    Object.keys(decks || {}).forEach(deckId => {
+        const deck = decks[deckId];
+        if (deck) {
+            deckNameMap[deckId] = deck.name || `Baralho ${deckId}`;
+        }
+    });
+
+    const cardsStmt = db.prepare("SELECT nid, did FROM cards");
+    const noteToDeckId = new Map<number, string>();
+    while (cardsStmt.step()) {
+        const row = cardsStmt.getAsObject();
+        const nid = row.nid as number;
+        const didValue = row.did as number;
+        if (nid && didValue && !noteToDeckId.has(nid)) {
+            noteToDeckId.set(nid, didValue.toString());
+        }
+    }
+    cardsStmt.free();
 
     const ankiCards: AnkiCard[] = [];
     const totalNotes = notes.length;
@@ -208,20 +308,6 @@ export const parseAnkiPackage = async (
         let frontHtml = fields[frontIdx] || '';
         let backHtml = fields[backIdx] || '';
         
-        // Smart field detection: skip fields that look like IDs or metadata
-        const isLikelyMetadata = (text: string) => {
-            const cleaned = stripHtml(text).trim();
-            // Skip if it looks like an ID (contains numbers and dashes, short length)
-            if (/^[a-zA-Z0-9\-_]+$/.test(cleaned) && cleaned.length < 30) {
-                return true;
-            }
-            // Skip if it's a single number
-            if (/^\d+$/.test(cleaned)) {
-                return true;
-            }
-            return false;
-        };
-        
         // If front field looks like metadata, try to find a better field
         if (isLikelyMetadata(frontHtml)) {
             console.warn('[AnkiParser] Front field looks like metadata, searching for better field:', stripHtml(frontHtml).substring(0, 50));
@@ -246,17 +332,46 @@ export const parseAnkiPackage = async (
             }
         }
 
+        let frontText = stripAndClean(frontHtml);
+        if (!frontText) {
+            const alternativeFront = pickBestField(fields, new Set([backIdx].filter(idx => idx >= 0)));
+            if (alternativeFront) {
+                frontIdx = alternativeFront.idx;
+                frontHtml = alternativeFront.html;
+                frontText = alternativeFront.cleanedText;
+                console.log('[AnkiParser] Using alternative field as front:', {
+                    noteId: note.id,
+                    alternativeIndex: alternativeFront.idx,
+                    preview: frontText.substring(0, 80)
+                });
+            }
+        }
+
+        let backText = stripAndClean(backHtml);
+        if (!backText) {
+            const alternativeBack = pickBestField(
+                fields,
+                new Set([frontIdx].filter(idx => idx >= 0)),
+                true
+            );
+            if (alternativeBack) {
+                backIdx = alternativeBack.idx;
+                backHtml = alternativeBack.html;
+                backText = alternativeBack.cleanedText;
+                console.log('[AnkiParser] Using alternative field as back:', {
+                    noteId: note.id,
+                    alternativeIndex: alternativeBack.idx,
+                    preview: backText.substring(0, 80)
+                });
+            }
+        }
+
         // Extract all images and audio from both front and back
         let imageB64: string | undefined = undefined;
         let audioB64: string | undefined = undefined;
         
-        const frontImages = extractAllImageSrcs(frontHtml);
-        const backImages = extractAllImageSrcs(backHtml);
-        const allImages = [...frontImages, ...backImages];
-        
-        const frontAudios = extractAllAudioSrcs(frontHtml);
-        const backAudios = extractAllAudioSrcs(backHtml);
-        const allAudios = [...frontAudios, ...backAudios];
+        const allImages = Array.from(new Set(fields.flatMap(extractAllImageSrcs)));
+        const allAudios = Array.from(new Set(fields.flatMap(extractAllAudioSrcs)));
 
         // Extract first image if available
         if (allImages.length > 0) {
@@ -292,9 +407,6 @@ export const parseAnkiPackage = async (
             }
         }
         
-        const frontText = removeInstructionalText(stripHtml(frontHtml));
-        const backText = removeInstructionalText(stripHtml(backHtml));
-
         if (!frontText && !backText) {
             // Skip empty cards after cleaning
             console.log('[AnkiParser] Skipping empty card after cleaning:', { noteId: note.id });
@@ -317,6 +429,9 @@ export const parseAnkiPackage = async (
             });
         }
 
+        const noteDeckId = noteToDeckId.get(note.id);
+        const noteDeckName = noteDeckId ? deckNameMap[noteDeckId] || `Deck ${noteDeckId}` : undefined;
+
         ankiCards.push({
             id: note.id,
             front: frontText,
@@ -324,6 +439,8 @@ export const parseAnkiPackage = async (
             image: imageB64,
             audio: audioB64,
             tags: note.tags,
+            deckId: noteDeckId,
+            deckName: noteDeckName,
         });
 
         if (i % 10 === 0) {

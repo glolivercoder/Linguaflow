@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import { Settings, Flashcard } from '../types';
+import { Settings, Flashcard, AnkiDeckSummary } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
 
 interface PhoneticCache {
@@ -16,6 +16,8 @@ interface SettingsRecord extends Settings {
     id: number;
 }
 
+interface AnkiDeckRecord extends AnkiDeckSummary {}
+
 const db = new Dexie('linguaFlowDB');
 
 db.version(2).stores({
@@ -25,10 +27,26 @@ db.version(2).stores({
   imageOverrides: 'cardId',
 });
 
+db.version(3).stores({
+  settings: 'id',
+  flashcards: 'id, sourceType, ankiDeckId',
+  phonetics: 'cardId',
+  imageOverrides: 'cardId',
+  ankiDecks: 'id',
+}).upgrade(async tx => {
+  const flashcardsTable = tx.table('flashcards');
+  await flashcardsTable.toCollection().modify((card: any) => {
+    if (!card.sourceType) {
+      card.sourceType = typeof card.id === 'string' && card.id.startsWith('anki-') ? 'anki' : 'manual';
+    }
+  });
+});
+
 const settingsTable: Table<SettingsRecord, number> = db.table('settings');
 const flashcardsTable: Table<Flashcard, string> = db.table('flashcards');
 const phoneticsTable: Table<PhoneticCache, string> = db.table('phonetics');
 const imageOverridesTable: Table<ImageOverride, string> = db.table('imageOverrides');
+const ankiDecksTable: Table<AnkiDeckRecord, string> = db.table('ankiDecks');
 
 
 // --- Settings ---
@@ -79,6 +97,11 @@ export const updateFlashcardImage = async (cardId: string, imageUrl: string): Pr
   await flashcardsTable.update(cardId, { imageUrl });
 };
 
+export const deleteFlashcards = async (cardIds: string[]): Promise<void> => {
+  if (!cardIds.length) return;
+  await flashcardsTable.bulkDelete(cardIds);
+};
+
 // --- Phonetics Cache ---
 export const cachePhonetic = async (cardId: string, phonetic: string): Promise<void> => {
   await phoneticsTable.put({ cardId, phonetic });
@@ -100,4 +123,34 @@ export const saveImageOverride = async (cardId: string, imageUrl: string): Promi
 
 export const getAllImageOverrides = (): Promise<ImageOverride[]> => {
   return imageOverridesTable.toArray();
+};
+
+// --- Anki Decks ---
+export const getAnkiDeckSummaries = (): Promise<AnkiDeckSummary[]> => {
+  return ankiDecksTable.orderBy('importedAt').reverse().toArray();
+};
+
+export const upsertAnkiDeckSummary = async (summary: AnkiDeckSummary): Promise<void> => {
+  await ankiDecksTable.put(summary);
+};
+
+export const deleteAnkiDeck = async (deckId: string): Promise<void> => {
+  await db.transaction('rw', flashcardsTable, phoneticsTable, imageOverridesTable, ankiDecksTable, async () => {
+    const flashcardIds = await flashcardsTable.where('ankiDeckId').equals(deckId).primaryKeys() as string[];
+    if (flashcardIds.length) {
+      await flashcardsTable.where('ankiDeckId').equals(deckId).delete();
+      await phoneticsTable.bulkDelete(flashcardIds);
+      await imageOverridesTable.bulkDelete(flashcardIds);
+    }
+    await ankiDecksTable.delete(deckId);
+  });
+};
+
+export const replaceAnkiDeckSummaries = async (summaries: AnkiDeckSummary[]): Promise<void> => {
+  await db.transaction('rw', ankiDecksTable, async () => {
+    await ankiDecksTable.clear();
+    if (summaries.length) {
+      await ankiDecksTable.bulkAdd(summaries);
+    }
+  });
 };

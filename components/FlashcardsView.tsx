@@ -66,7 +66,7 @@ const ImagePickerModal: React.FC<{
 };
 
 
-const FlashcardItem: React.FC<{
+export const FlashcardItem: React.FC<{
   card: Flashcard;
   settings: Settings;
   isObjectCard: boolean;

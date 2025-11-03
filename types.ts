@@ -9,6 +9,8 @@ export interface Language {
 
 export type VoiceGender = 'male' | 'female' | 'neutral';
 
+export type FlashcardSourceType = 'manual' | 'anki';
+
 export interface Flashcard {
   id: string;
   originalText: string;
@@ -17,6 +19,10 @@ export interface Flashcard {
   originalLang: LanguageCode;
   translatedLang: LanguageCode;
   imageUrl?: string;
+  sourceType?: FlashcardSourceType;
+  ankiDeckId?: string;
+  ankiDeckName?: string;
+  ankiNoteId?: number;
 }
 
 export interface Settings {
@@ -56,4 +62,13 @@ export interface AnkiCard {
     image?: string;
     audio?: string;
     tags: string[];
+    deckId?: string;
+    deckName?: string;
+}
+
+export interface AnkiDeckSummary {
+    id: string;
+    name: string;
+    cardCount: number;
+    importedAt: number;
 }

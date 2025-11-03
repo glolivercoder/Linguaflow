@@ -1,13 +1,16 @@
-import React, { useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { parseAnkiPackage } from '../services/ankiParser';
-import { AnkiCard } from '../types';
+import { AnkiCard, Flashcard, Settings } from '../types';
+import { FlashcardItem } from './FlashcardsView';
 
 interface AnkiViewProps {
+  decks: Record<string, { name: string; cards: Flashcard[] }>;
   onImportComplete: (cards: AnkiCard[]) => void;
+  settings: Settings;
   onBack: () => void;
 }
 
-const AnkiView: React.FC<AnkiViewProps> = ({ onImportComplete, onBack }) => {
+const AnkiView: React.FC<AnkiViewProps> = ({ decks, onImportComplete, settings, onBack }) => {
   const [isImporting, setIsImporting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
@@ -15,7 +18,19 @@ const AnkiView: React.FC<AnkiViewProps> = ({ onImportComplete, onBack }) => {
   const [preview, setPreview] = useState<AnkiCard[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [importCount, setImportCount] = useState(0);
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
 
+  const sortedDeckEntries = useMemo(() => {
+    const entries = Object.entries(decks) as [string, { name: string; cards: Flashcard[] }][];
+    return entries.sort((a, b) => {
+      const nameA = a[1].name.toLowerCase();
+      const nameB = b[1].name.toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+  }, [decks]);
+
+  const selectedDeck = selectedDeckId ? decks[selectedDeckId] : null;
+  const deckCount = sortedDeckEntries.length;
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -73,8 +88,82 @@ const AnkiView: React.FC<AnkiViewProps> = ({ onImportComplete, onBack }) => {
 
   return (
     <div className="p-4 md:p-6 h-full flex flex-col animate-fade-in">
-        <h2 className="text-2xl font-bold mb-6 text-cyan-400">Importar do Anki</h2>
-        <div className="max-w-2xl mx-auto w-full">
+        <h2 className="text-2xl font-bold mb-6 text-cyan-400">Baralhos do Anki</h2>
+        <div className="max-w-5xl mx-auto w-full space-y-8">
+
+            <div className="bg-gray-800 rounded-lg p-6">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <h3 className="text-xl font-semibold text-white">Baralhos importados</h3>
+                  <p className="text-sm text-gray-400">
+                    {deckCount === 0
+                      ? 'Nenhum baralho importado ainda. Importe um arquivo .apkg para começar.'
+                      : `${deckCount} baralho${deckCount > 1 ? 's' : ''} disponível${deckCount > 1 ? 's' : ''}.`}
+                  </p>
+                </div>
+              </div>
+
+              {deckCount === 0 ? (
+                <p className="mt-4 text-sm text-gray-400">
+                  Após importar um arquivo, os baralhos aparecerão aqui com acesso rápido aos cards.
+                </p>
+              ) : (
+                <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {sortedDeckEntries.map(([deckId, deckInfo]) => (
+                    <button
+                      key={deckId}
+                      onClick={() => setSelectedDeckId(deckId)}
+                      className={`text-left bg-gray-900 border ${selectedDeckId === deckId ? 'border-cyan-500' : 'border-gray-700 hover:border-cyan-400'} rounded-lg p-4 transition-colors`}
+                    >
+                      <h4 className="text-lg font-semibold text-white truncate">{deckInfo.name}</h4>
+                      <p className="text-sm text-gray-400 mt-1">{deckInfo.cards.length} cards</p>
+                      <p className="text-xs text-gray-500 mt-3">Clique para visualizar os cards deste baralho.</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {selectedDeck && (
+              <div className="bg-gray-800 rounded-lg p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xl font-semibold text-white">{selectedDeck.name}</h3>
+                    <p className="text-sm text-gray-400">{selectedDeck.cards.length} cards importados</p>
+                  </div>
+                  <button
+                    onClick={() => setSelectedDeckId(null)}
+                    className="text-sm text-gray-400 hover:text-white transition-colors"
+                  >
+                    Fechar
+                  </button>
+                </div>
+                <div className="mt-4 grid gap-6 md:grid-cols-2">
+                  {selectedDeck.cards.map(card => {
+                    const displayCard: Flashcard = {
+                      ...card,
+                      originalText: card.translatedText,
+                      originalLang: card.translatedLang,
+                      translatedText: card.originalText,
+                      translatedLang: card.originalLang,
+                    };
+
+                    return (
+                      <div key={card.id} className="bg-gray-900/40 border border-gray-700 rounded-lg p-4 flex justify-center">
+                        <div className="w-full max-w-xs">
+                          <FlashcardItem
+                            card={displayCard}
+                            settings={settings}
+                            isObjectCard={false}
+                            onPickImage={() => {}}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="bg-gray-800 rounded-lg p-6">
                 <div className="flex items-center justify-center w-full">
@@ -122,7 +211,7 @@ const AnkiView: React.FC<AnkiViewProps> = ({ onImportComplete, onBack }) => {
                 {importCount > 0 && (
                      <div className="mt-4 bg-green-900/50 border border-green-500 rounded-lg p-3">
                         <p className="text-green-300 text-sm font-semibold">{importCount} cards importados com sucesso de "{fileName}"!</p>
-                        <p className="text-gray-300 text-xs mt-1">Você pode vê-los na aba Flashcards, na categoria "Importado do Anki".</p>
+                        <p className="text-gray-300 text-xs mt-1">Abra o baralho listado acima para revisar os novos cards.</p>
                     </div>
                 )}
 
@@ -153,17 +242,6 @@ const AnkiView: React.FC<AnkiViewProps> = ({ onImportComplete, onBack }) => {
                 )}
             </div>
 
-            <div className="mt-6 bg-gray-800/50 border border-gray-700 rounded-lg p-4">
-                <h4 className="text-sm font-semibold text-cyan-400 mb-2">
-                Como funciona e Dicas
-                </h4>
-                <ul className="text-sm text-gray-400 space-y-2 list-disc list-inside">
-                    <li>Esta ferramenta funciona melhor com baralhos do tipo <strong>Básico</strong> do Anki (frente e verso).</li>
-                    <li>Imagens nos campos 'Front' ou 'Back' são importadas. Áudios e campos extras são ignorados.</li>
-                    <li>O lado da 'Frente' do seu card será usado como o idioma que você está aprendendo, e o 'Verso' como sua língua nativa.</li>
-                    <li>A importação acontece inteiramente no seu navegador, seus arquivos não são enviados para nenhum servidor.</li>
-                </ul>
-            </div>
         </div>
         <div className="mt-auto pt-6">
             <button
