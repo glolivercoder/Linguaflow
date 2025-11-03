@@ -1,146 +1,18 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Settings } from '../types';
 import { SUPPORTED_LANGUAGES } from '../constants';
-
-interface GrammarPoint {
-  id: string;
-  title: string;
-  description: string;
-  pattern: string;
-  exampleEn: string;
-  examplePt: string;
-}
-
-interface ExerciseItem {
-  id: string;
-  title: string;
-  sentenceEn: string;
-  sentencePt: string;
-  answer: string;
-  hint?: string;
-}
+import { smartCategories, SmartCategory, SmartTopic, ExerciseItem } from '../data/smartLearnData';
 
 interface SmartLearnViewProps {
   settings: Settings;
   onBack: () => void;
 }
 
-const grammarPoints: GrammarPoint[] = [
-  {
-    id: 'plural',
-    title: 'Plurals',
-    description: 'Most English nouns become plural by adding “-s”. Words ending in s, sh, ch, x, or z usually add “-es”.',
-    pattern: 'singular + s → plural',
-    exampleEn: 'One book → Two books / One class → Two classes',
-    examplePt: 'Um livro → Dois livros / Uma aula → Duas aulas'
-  },
-  {
-    id: 'present-simple',
-    title: 'Present Simple',
-    description: 'Used for routines and facts. Add “-s” or “-es” to the verb with he/she/it.',
-    pattern: 'Subject + base verb (add -s/-es for he/she/it)',
-    exampleEn: 'She works every day.',
-    examplePt: 'Ela trabalha todos os dias.'
-  },
-  {
-    id: 'past-simple',
-    title: 'Past Simple',
-    description: 'Used for finished actions in the past. Regular verbs often end in “-ed”.',
-    pattern: 'Subject + verb-ed (regular verbs)',
-    exampleEn: 'They visited their grandparents.',
-    examplePt: 'Eles visitaram os avós.'
-  },
-  {
-    id: 'future-will',
-    title: 'Future with Will',
-    description: 'Use “will” + base verb to express future decisions or predictions.',
-    pattern: 'Subject + will + base verb',
-    exampleEn: 'We will travel tomorrow.',
-    examplePt: 'Nós viajaremos amanhã.'
-  },
-  {
-    id: 'negative-do',
-    title: 'Negative with Do/Does',
-    description: 'Use “do not (don’t)” or “does not (doesn’t)” + base verb for negation in the present simple.',
-    pattern: 'Subject + do/does + not + base verb',
-    exampleEn: "He doesn't like coffee.",
-    examplePt: 'Ele não gosta de café.'
-  },
-  {
-    id: 'negative-did',
-    title: 'Negative with Did',
-    description: 'Use “did not (didn’t)” + base verb to negate actions in the past simple.',
-    pattern: 'Subject + did not + base verb',
-    exampleEn: "They didn't finish the homework.",
-    examplePt: 'Eles não terminaram a lição de casa.'
-  },
-  {
-    id: 'negative-will',
-    title: 'Negative with Will',
-    description: 'Use “will not (won’t)” + base verb to negate future actions.',
-    pattern: 'Subject + will not + base verb',
-    exampleEn: "She won't forget your birthday.",
-    examplePt: 'Ela não vai esquecer o seu aniversário.'
-  }
-];
-
-const exerciseItems: ExerciseItem[] = [
-  {
-    id: 'ex1',
-    title: 'Plural Practice',
-    sentenceEn: 'There are two _______ (book) on the table.',
-    sentencePt: 'Há dois _______ na mesa.',
-    answer: 'books',
-    hint: 'Lembre-se de adicionar “-s”.'
-  },
-  {
-    id: 'ex2',
-    title: 'Present Simple',
-    sentenceEn: 'She _______ (study) English every night.',
-    sentencePt: 'Ela _______ inglês todas as noites.',
-    answer: 'studies',
-    hint: 'He/she/it precisa de “-es” quando termina em consoante + y.'
-  },
-  {
-    id: 'ex3',
-    title: 'Past Simple',
-    sentenceEn: 'They _______ (watch) a movie yesterday.',
-    sentencePt: 'Eles _______ um filme ontem.',
-    answer: 'watched'
-  },
-  {
-    id: 'ex4',
-    title: 'Future Will',
-    sentenceEn: 'I _______ (call) you later.',
-    sentencePt: 'Eu _______ você mais tarde.',
-    answer: 'will call'
-  },
-  {
-    id: 'ex5',
-    title: 'Negative Do/Does',
-    sentenceEn: 'He _______ (not / eat) vegetables.',
-    sentencePt: 'Ele _______ vegetais.',
-    answer: "doesn't eat"
-  },
-  {
-    id: 'ex6',
-    title: 'Negative Did',
-    sentenceEn: 'We _______ (not / go) to the party.',
-    sentencePt: 'Nós _______ à festa.',
-    answer: "didn't go"
-  },
-  {
-    id: 'ex7',
-    title: 'Negative Will',
-    sentenceEn: 'They _______ (not / travel) this weekend.',
-    sentencePt: 'Eles _______ neste final de semana.',
-    answer: "won't travel"
-  }
-];
-
 const SmartLearnView: React.FC<SmartLearnViewProps> = ({ settings, onBack }) => {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState<Record<string, 'correct' | 'incorrect' | null>>({});
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
 
   const learningLangName = useMemo(() => {
     return SUPPORTED_LANGUAGES.find(lang => lang.code === settings.learningLanguage)?.name || 'Inglês';
@@ -186,8 +58,25 @@ const SmartLearnView: React.FC<SmartLearnViewProps> = ({ settings, onBack }) => 
     setFeedback(prev => ({ ...prev, [exerciseId]: null }));
   }, []);
 
-  const definitions = useMemo(() => grammarPoints, []);
-  const exercises = useMemo(() => exerciseItems, []);
+  const categories = useMemo(() => smartCategories, []);
+  const selectedCategory = useMemo(() => categories.find(category => category.id === selectedCategoryId) || null, [selectedCategoryId, categories]);
+  const selectedTopic = useMemo(() => selectedCategory?.topics.find(topic => topic.id === selectedTopicId) || null, [selectedCategory, selectedTopicId]);
+
+  const handleSelectCategory = useCallback((categoryId: string) => {
+    setSelectedCategoryId(prev => {
+      if (prev === categoryId) {
+        setSelectedTopicId(null);
+        return null;
+      }
+
+      setSelectedTopicId(null);
+      return categoryId;
+    });
+  }, []);
+
+  const handleSelectTopic = useCallback((topicId: string) => {
+    setSelectedTopicId(topicId);
+  }, []);
 
   return (
     <div className="p-4 md:p-6 h-full flex flex-col animate-fade-in">
@@ -198,84 +87,144 @@ const SmartLearnView: React.FC<SmartLearnViewProps> = ({ settings, onBack }) => 
           branco para fixar o conteúdo. Sons e animações mostram acertos e erros instantaneamente.
         </p>
       </header>
-
-      <section className="grid gap-4 md:gap-6 md:grid-cols-2 xl:grid-cols-3 mb-8">
-        {definitions.map(point => (
-          <article key={point.id} className="bg-gray-800 rounded-xl border border-gray-700 p-4 shadow-lg hover:border-cyan-500 transition-colors">
-            <h3 className="text-lg font-semibold text-white mb-2">{point.title}</h3>
-            <p className="text-sm text-gray-300 mb-3">{point.description}</p>
-            <div className="bg-gray-900/60 rounded-lg p-3 mb-2">
-              <p className="text-xs uppercase tracking-wide text-gray-400">Estrutura</p>
-              <p className="text-sm text-white">{point.pattern}</p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs uppercase tracking-wide text-cyan-400">Exemplo em inglês</p>
-              <p className="text-sm text-white">{point.exampleEn}</p>
-              <p className="text-xs uppercase tracking-wide text-gray-400 mt-3">Tradução</p>
-              <p className="text-sm text-gray-200">{point.examplePt}</p>
-            </div>
-          </article>
-        ))}
-      </section>
-
-      <section className="bg-gray-800/60 border border-gray-700 rounded-xl p-5 shadow-xl">
-        <h3 className="text-xl font-semibold text-white mb-4">Exercícios de Fixação</h3>
-        <div className="space-y-4">
-          {exercises.map(item => {
-            const status = feedback[item.id];
-            const isCorrect = status === 'correct';
-            const isIncorrect = status === 'incorrect';
-
-            return (
-              <div
-                key={item.id}
-                className={`rounded-lg p-4 bg-gray-900/70 border transition-all duration-300 ${
-                  isCorrect ? 'border-green-500 shadow-green-500/30 smart-animate-correct' :
-                  isIncorrect ? 'border-red-500 shadow-red-500/30 smart-animate-incorrect' : 'border-gray-700'
+      <div className="flex flex-1 flex-col md:flex-row gap-6 overflow-hidden">
+        <aside className="w-full md:w-72 lg:w-80 bg-gray-800/80 border border-gray-700 rounded-xl p-4 h-full max-h-[32rem] md:max-h-none md:overflow-y-auto">
+          <h3 className="text-lg font-semibold text-cyan-300 mb-3">Categorias de Gramática</h3>
+          <nav className="space-y-2">
+            {categories.map(category => (
+              <button
+                key={category.id}
+                onClick={() => handleSelectCategory(category.id)}
+                className={`w-full text-left px-3 py-2 rounded-lg transition-colors text-sm font-medium ${
+                  selectedCategoryId === category.id
+                    ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-500/20'
+                    : 'bg-gray-900/60 border border-gray-700 text-gray-200 hover:border-cyan-500'
                 }`}
               >
-                <h4 className="text-lg font-semibold text-cyan-300 mb-2">{item.title}</h4>
-                <p className="text-sm text-white">{item.sentenceEn}</p>
-                <p className="text-xs text-gray-400 mb-3">{item.sentencePt}</p>
-                <div className="flex flex-col md:flex-row md:items-center gap-3">
-                  <input
-                    type="text"
-                    value={answers[item.id] || ''}
-                    onChange={event => handleAnswerChange(item.id, event.target.value)}
-                    placeholder="Digite a resposta em inglês"
-                    className={`w-full md:w-2/3 px-4 py-2 rounded-lg bg-gray-800 border focus:outline-none focus:ring-2 focus:ring-cyan-500 ${
-                      isCorrect ? 'border-green-500' : isIncorrect ? 'border-red-500' : 'border-gray-600'
-                    }`}
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => checkAnswer(item)}
-                      className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 transition-colors text-sm font-semibold"
-                    >
-                      Verificar
-                    </button>
-                    <button
-                      onClick={() => resetAnswer(item.id)}
-                      className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors text-sm"
-                    >
-                      Limpar
-                    </button>
+                {category.title}
+              </button>
+            ))}
+          </nav>
+          {selectedCategory && (
+            <nav className="space-y-2 mt-6">
+              <h4 className="text-md font-semibold text-cyan-300 mb-2">Tópicos</h4>
+              {selectedCategory.topics.map(topic => (
+                <button
+                  key={topic.id}
+                  onClick={() => handleSelectTopic(topic.id)}
+                  className={`w-full text-left px-3 py-2 rounded-lg transition-colors text-sm font-medium ${
+                    selectedTopicId === topic.id
+                      ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-500/20'
+                      : 'bg-gray-900/60 border border-gray-700 text-gray-200 hover:border-cyan-500'
+                  }`}
+                >
+                  {topic.title}
+                </button>
+              ))}
+            </nav>
+          )}
+        </aside>
+
+        <main className="flex-1 bg-gray-800/60 border border-gray-700 rounded-xl p-6 shadow-xl overflow-y-auto">
+          {selectedTopic ? (
+            <div className="space-y-6">
+              <div>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-2xl font-semibold text-white">{selectedTopic.title}</h3>
+                    <p className="text-sm text-gray-300 mt-2">{selectedTopic.description}</p>
+                  </div>
+                  <button
+                    onClick={() => setSelectedTopicId(null)}
+                    className="text-xs uppercase tracking-wide text-gray-400 hover:text-gray-200 transition-colors"
+                  >
+                    Fechar tópico
+                  </button>
+                </div>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div className="bg-gray-900/70 rounded-lg p-4 border border-gray-700">
+                    <p className="text-xs uppercase tracking-wide text-gray-400">Estrutura</p>
+                    <p className="text-sm text-white mt-1">{selectedTopic.pattern}</p>
+                  </div>
+                  <div className="bg-gray-900/70 rounded-lg p-4 border border-gray-700">
+                    <p className="text-xs uppercase tracking-wide text-cyan-400">Exemplo em inglês</p>
+                    <p className="text-sm text-white mt-1">{selectedTopic.exampleEn}</p>
+                    <p className="text-xs uppercase tracking-wide text-gray-400 mt-3">Tradução</p>
+                    <p className="text-sm text-gray-200 mt-1">{selectedTopic.examplePt}</p>
                   </div>
                 </div>
-                {item.hint && !isCorrect && !isIncorrect && (
-                  <p className="text-xs text-gray-500 mt-2">Dica: {item.hint}</p>
-                )}
-                {isCorrect && (
-                  <p className="text-sm text-green-400 mt-2 font-semibold">Excelente! Você acertou.</p>
-                )}
-                {isIncorrect && (
-                  <p className="text-sm text-red-400 mt-2 font-semibold">Quase! Reveja a estrutura e tente novamente.</p>
-                )}
               </div>
-            );
-          })}
-        </div>
-      </section>
+
+              <section>
+                <h4 className="text-lg font-semibold text-white mb-3">Exercícios de Fixação</h4>
+                <div className="space-y-4">
+                  {selectedTopic.exercises.map(item => {
+                    const status = feedback[item.id];
+                    const isCorrect = status === 'correct';
+                    const isIncorrect = status === 'incorrect';
+
+                    return (
+                      <div
+                        key={item.id}
+                        className={`rounded-lg p-4 bg-gray-900/70 border transition-all duration-300 ${
+                          isCorrect ? 'border-green-500 shadow-green-500/30 smart-animate-correct' :
+                          isIncorrect ? 'border-red-500 shadow-red-500/30 smart-animate-incorrect' : 'border-gray-700'
+                        }`}
+                      >
+                        <h5 className="text-md font-semibold text-cyan-300 mb-2">{item.title}</h5>
+                        <p className="text-sm text-white">{item.sentenceEn}</p>
+                        <p className="text-xs text-gray-400 mb-3">{item.sentencePt}</p>
+                        <div className="flex flex-col md:flex-row md:items-center gap-3">
+                          <input
+                            type="text"
+                            value={answers[item.id] || ''}
+                            onChange={event => handleAnswerChange(item.id, event.target.value)}
+                            placeholder="Digite a resposta em inglês"
+                            className={`w-full md:w-2/3 px-4 py-2 rounded-lg bg-gray-800 border focus:outline-none focus:ring-2 focus:ring-cyan-500 ${
+                              isCorrect ? 'border-green-500' : isIncorrect ? 'border-red-500' : 'border-gray-600'
+                            }`}
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => checkAnswer(item)}
+                              className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 transition-colors text-sm font-semibold"
+                            >
+                              Verificar
+                            </button>
+                            <button
+                              onClick={() => resetAnswer(item.id)}
+                              className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition-colors text-sm"
+                            >
+                              Limpar
+                            </button>
+                          </div>
+                        </div>
+                        {item.hint && !isCorrect && !isIncorrect && (
+                          <p className="text-xs text-gray-500 mt-2">Dica: {item.hint}</p>
+                        )}
+                        {isCorrect && (
+                          <p className="text-sm text-green-400 mt-2 font-semibold">Excelente! Você acertou.</p>
+                        )}
+                        {isIncorrect && (
+                          <p className="text-sm text-red-400 mt-2 font-semibold">Quase! Reveja a estrutura e tente novamente.</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            </div>
+          ) : (
+            <div className="h-full flex flex-col items-center justify-center text-center text-gray-300">
+              <p className="text-lg font-semibold text-white">Selecione uma categoria e um tópico na barra lateral</p>
+              <p className="text-sm mt-2 text-gray-400 max-w-md">
+                Clique em uma categoria e em seguida em um tópico para ver a explicação completa, exemplos traduzidos e exercícios interativos com feedback imediato.
+              </p>
+            </div>
+          )}
+        </main>
+      </div>
 
       <div className="mt-auto pt-6 flex justify-end">
         <button
