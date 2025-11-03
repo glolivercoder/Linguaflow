@@ -6,6 +6,7 @@ import { PREDEFINED_FLASHCARD_DATA } from './data/flashcardData';
 import ConversationView from './components/ConversationView';
 import FlashcardsView from './components/FlashcardsView';
 import SettingsView from './components/SettingsView';
+import SmartLearnView from './components/SmartLearnView';
 import AnkiView from './components/AnkiView';
 import { SettingsIcon, BookOpenIcon, MicIcon, CubeIcon } from './components/icons';
 import * as db from './services/db';
@@ -330,6 +331,8 @@ const App: React.FC = () => {
         );
       case 'anki':
         return <AnkiView decks={ankiDeckCards} onImportComplete={handleAnkiImport} settings={settings} onBack={() => setView('conversation')} />;
+      case 'smartLearn':
+        return <SmartLearnView settings={settings} onBack={() => setView('conversation')} />;
       default:
         return <ConversationView settings={settings} addFlashcard={addFlashcard} />;
     }
@@ -359,6 +362,12 @@ const App: React.FC = () => {
             icon={<CubeIcon className="w-5 h-5" />}
             isActive={view === 'anki'}
             onClick={() => setView('anki')}
+          />
+          <NavButton
+            label="Smart Learn"
+            icon={<BookOpenIcon className="w-5 h-5" />}
+            isActive={view === 'smartLearn'}
+            onClick={() => setView('smartLearn')}
           />
           <NavButton
             label="Ajustes"
