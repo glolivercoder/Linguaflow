@@ -9,11 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "react-dom": "^19.2.0",
-    "react": "^19.2.0",
     "@google/genai": "^1.28.0",
     "dexie": "4.0.7",
     "jszip": "^3.10.1",
+    "lucide-react": "^0.552.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
     "sql.js": "^1.10.3"
   },
   "devDependencies": {

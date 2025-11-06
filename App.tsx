@@ -8,7 +8,9 @@ import FlashcardsView from './components/FlashcardsView';
 import SettingsView from './components/SettingsView';
 import SmartLearnView from './components/SmartLearnView';
 import AnkiView from './components/AnkiView';
+import LicoesView from './components/LicoesView';
 import { SettingsIcon, BookOpenIcon, MicIcon, CubeIcon } from './components/icons';
+import { GraduationCap } from 'lucide-react';
 import * as db from './services/db';
 import { ImageOverride } from './services/db';
 import { downloadPixabayLogs, clearPixabayLogs, addPixabayLog, getPixabayLogs } from './services/pixabayLogger';
@@ -333,6 +335,8 @@ const App: React.FC = () => {
         return <AnkiView decks={ankiDeckCards} onImportComplete={handleAnkiImport} settings={settings} onBack={() => setView('conversation')} />;
       case 'smartLearn':
         return <SmartLearnView settings={settings} onBack={() => setView('conversation')} />;
+      case 'licoes':
+        return <LicoesView settings={settings} onBack={() => setView('conversation')} />;
       default:
         return <ConversationView settings={settings} addFlashcard={addFlashcard} />;
     }
@@ -368,6 +372,12 @@ const App: React.FC = () => {
             icon={<BookOpenIcon className="w-5 h-5" />}
             isActive={view === 'smartLearn'}
             onClick={() => setView('smartLearn')}
+          />
+          <NavButton
+            label="Lições"
+            icon={<GraduationCap className="w-5 h-5" />}
+            isActive={view === 'licoes'}
+            onClick={() => setView('licoes')}
           />
           <NavButton
             label="Ajustes"

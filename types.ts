@@ -31,7 +31,7 @@ export interface Settings {
   voiceGender: VoiceGender;
 }
 
-export type View = 'conversation' | 'flashcards' | 'settings' | 'anki' | 'smartLearn';
+export type View = 'conversation' | 'flashcards' | 'settings' | 'anki' | 'smartLearn' | 'licoes';
 
 
 // --- New types for Predefined Flashcard Data ---
