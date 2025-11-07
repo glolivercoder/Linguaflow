@@ -1,0 +1,182 @@
+================================================================================
+   🚀 LINGUAFLOW - Sistema de Aprendizado de Inglês com IA
+================================================================================
+
+📋 INÍCIO RÁPIDO
+================================================================================
+
+1. INICIAR O SISTEMA (Automático)
+   
+   Clique duas vezes no arquivo:
+   
+   ⭐ INICIAR_LINGUAFLOW.bat
+   
+   Isso irá:
+   ✅ Iniciar o backend (Python)
+   ✅ Iniciar o frontend (React)
+   ✅ Abrir o navegador automaticamente
+
+2. ACESSAR A APLICAÇÃO
+
+   URL: http://localhost:5173
+   
+   O navegador abrirá automaticamente!
+
+================================================================================
+📚 FUNCIONALIDADES
+================================================================================
+
+✅ LIÇÕES INTERATIVAS
+   - Histórias em inglês por níveis
+   - Exercícios de interpretação (Quiz)
+   - Exercícios de escrita com scoring
+   - Dicionário integrado
+
+✅ TESTE DE PRONÚNCIA (NOVO!)
+   - Grave sua voz
+   - Ouça pronúncia nativa (TTS)
+   - Receba análise automática
+   - Visualize seu score
+
+✅ SMART LEARN
+   - Aprendizado adaptativo
+   - Revisão espaçada (Anki)
+   - Conversação com IA
+
+================================================================================
+🔧 COMO USAR O TESTE DE PRONÚNCIA
+================================================================================
+
+1. Clique em "Lições" no menu superior
+2. Clique em "Pronúncia"
+3. Selecione uma frase
+4. Clique em "Ouvir pronúncia nativa"
+5. Clique em "Gravar minha pronúncia"
+6. Fale no microfone
+7. Clique em "Parar gravação"
+8. Aguarde a análise (3-5 segundos)
+9. Veja seu score e feedback!
+
+================================================================================
+⚙️ REQUISITOS DO SISTEMA
+================================================================================
+
+✅ Python 3.11+
+✅ Node.js 18+
+✅ Conexão com Internet (para TTS e Speech Recognition)
+✅ Microfone (para teste de pronúncia)
+✅ Navegador moderno (Chrome, Edge, Firefox)
+
+================================================================================
+🆘 RESOLUÇÃO DE PROBLEMAS
+================================================================================
+
+PROBLEMA: "Python não encontrado"
+SOLUÇÃO: Instale Python 3.11+ em https://www.python.org
+
+PROBLEMA: "Node.js não encontrado"
+SOLUÇÃO: Instale Node.js em https://nodejs.org
+
+PROBLEMA: "Microfone não funciona"
+SOLUÇÃO: Permita acesso ao microfone no navegador
+         Chrome: chrome://settings/content/microphone
+
+PROBLEMA: Backend não inicia
+SOLUÇÃO: 
+   1. Abra terminal na pasta backend/pronunciation
+   2. Execute: setup.bat
+   3. Tente novamente
+
+PROBLEMA: Frontend não abre
+SOLUÇÃO:
+   1. Abra terminal na pasta raiz
+   2. Execute: npm install
+   3. Execute: npm run dev
+
+================================================================================
+📁 ARQUIVOS IMPORTANTES
+================================================================================
+
+INICIAR_LINGUAFLOW.bat  - Script para iniciar tudo automaticamente
+QUICK_START_WINDOWS.md  - Guia detalhado de uso
+ANALISE_LOGS.md         - Análise técnica do sistema
+README.md               - Documentação técnica completa
+
+backend/pronunciation/  - Backend Python (FastAPI)
+components/             - Componentes React
+services/               - Serviços de integração
+
+================================================================================
+📊 STATUS ATUAL DO SISTEMA
+================================================================================
+
+✅ Backend Python: FUNCIONAL (porta 8000)
+✅ Frontend React: FUNCIONAL (porta 5173)
+✅ TTS (Text-to-Speech): gTTS - Google (requer internet)
+✅ Speech Recognition: Google (requer internet)
+✅ Análise de Pronúncia: Baseada em texto
+✅ Gravação de Áudio: MediaRecorder API
+✅ Interface Visual: Completa
+
+⚠️  Piper TTS Original: NÃO disponível no Windows
+    Alternativa ativa: gTTS (Google) - 100% funcional
+
+⚠️  openSMILE: NÃO disponível
+    Análise simplificada baseada em texto
+
+================================================================================
+🌐 URLs DO SISTEMA
+================================================================================
+
+Frontend:  http://localhost:5173
+Backend:   http://localhost:8000
+API Docs:  http://localhost:8000/docs
+Health:    http://localhost:8000/health
+
+================================================================================
+⚡ COMANDOS ÚTEIS
+================================================================================
+
+INICIAR TUDO:
+   INICIAR_LINGUAFLOW.bat
+
+APENAS BACKEND:
+   cd backend\pronunciation
+   uvicorn main_simple:app --host 0.0.0.0 --port 8000 --reload
+
+APENAS FRONTEND:
+   npm run dev
+
+BUILD PRODUÇÃO:
+   npm run build
+
+================================================================================
+📞 SUPORTE
+================================================================================
+
+Para mais informações, consulte:
+- QUICK_START_WINDOWS.md
+- ANALISE_LOGS.md
+- backend/pronunciation/README.md
+
+================================================================================
+✨ DESENVOLVIDO COM
+================================================================================
+
+Backend:  Python, FastAPI, gTTS, Speech Recognition
+Frontend: React, TypeScript, TailwindCSS, Vite
+IA:       Google Gemini API
+
+================================================================================
+🎯 VERSÃO
+================================================================================
+
+LinguaFlow v1.0 - Sistema Completo de Aprendizado de Inglês
+Última Atualização: 2025
+Status: ✅ Produção (Desenvolvimento)
+
+================================================================================
+
+Aproveite o LinguaFlow! 🚀📚🎤
+
+================================================================================

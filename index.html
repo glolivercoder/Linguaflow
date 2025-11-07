@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.tailwindcss.com https://aistudiocdn.com https://unpkg.com; style-src 'self' 'unsafe-inline'; connect-src *; img-src * data: blob:"
+      content="default-src 'self' blob: http://localhost:* https://localhost:*; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.tailwindcss.com https://aistudiocdn.com https://unpkg.com; style-src 'self' 'unsafe-inline'; connect-src * ws: wss:; img-src * data: blob:; media-src 'self' blob: data: http://localhost:* https://localhost:*"
     />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

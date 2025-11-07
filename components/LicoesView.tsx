@@ -9,6 +9,7 @@ import {
   DictionaryEntry,
   WritingExercise,
 } from '../types/licoes';
+import PronunciationTest from './PronunciationTest';
 import { LESSONS, BASE_DICTIONARY_ENTRIES } from '../data/lessonsData';
 import {
   Search,
@@ -51,12 +52,24 @@ interface WritingProgressState {
   statuses: WritingStatus[];
   feedback: string[];
   wordCounts: number[];
+  scores: number[];
+  metrics: WritingMetrics[];
   completed: boolean;
 }
 
 interface WritingEvaluation {
   status: WritingStatus;
   feedback: string;
+  score: number;
+  metrics: WritingMetrics;
+}
+
+interface WritingMetrics {
+  accuracy: number;
+  keywordCoverage: number;
+  lengthScore: number;
+  vocabularyScore: number;
+  grammarScore: number;
 }
 
 const createInitialQuizProgress = (questionCount: number): QuizProgressState => ({
@@ -71,6 +84,8 @@ const createInitialWritingProgress = (exerciseCount: number): WritingProgressSta
   statuses: Array(exerciseCount).fill('pending'),
   feedback: Array(exerciseCount).fill(''),
   wordCounts: Array(exerciseCount).fill(0),
+  scores: Array(exerciseCount).fill(0),
+  metrics: Array(exerciseCount).fill({ accuracy: 0, keywordCoverage: 0, lengthScore: 0, vocabularyScore: 0, grammarScore: 0 }),
   completed: exerciseCount === 0,
 });
 
@@ -115,6 +130,56 @@ const countWords = (value: string): number => {
   return trimmed.split(/\s+/).length;
 };
 
+const calculateVocabularyScore = (text: string): number => {
+  const words = text.trim().split(/\s+/);
+  const uniqueWords = new Set(words.map(w => w.toLowerCase()));
+  const vocabularyRichness = words.length > 0 ? (uniqueWords.size / words.length) : 0;
+  
+  const advancedWords = words.filter(word => word.length > 6).length;
+  const advancedRatio = words.length > 0 ? (advancedWords / words.length) : 0;
+  
+  return Math.min(100, (vocabularyRichness * 50) + (advancedRatio * 50));
+};
+
+const calculateGrammarScore = (text: string): number => {
+  let score = 100;
+  
+  const sentences = text.split(/[.!?]+/).filter(s => s.trim());
+  sentences.forEach(sentence => {
+    const trimmed = sentence.trim();
+    if (trimmed && !/^[A-Z]/.test(trimmed)) {
+      score -= 5;
+    }
+  });
+  
+  const hasPunctuation = /[.!?]$/.test(text.trim());
+  if (!hasPunctuation && text.trim().length > 20) {
+    score -= 10;
+  }
+  
+  return Math.max(0, score);
+};
+
+const STORAGE_KEY_QUIZ = 'linguaflow_quiz_progress';
+const STORAGE_KEY_WRITING = 'linguaflow_writing_progress';
+
+const loadProgressFromStorage = <T,>(key: string, defaultValue: T): T => {
+  try {
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : defaultValue;
+  } catch {
+    return defaultValue;
+  }
+};
+
+const saveProgressToStorage = <T,>(key: string, data: T): void => {
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch (error) {
+    console.error('Failed to save progress:', error);
+  }
+};
+
 const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
   const [activeTab, setActiveTab] = useState<TabType>('stories');
   const [selectedLevel, setSelectedLevel] = useState<LessonLevel | 'all'>('all');
@@ -122,8 +187,12 @@ const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [dictionaryQuery, setDictionaryQuery] = useState('');
   const [activeDictionaryEntry, setActiveDictionaryEntry] = useState<DictionaryEntryWithMeta | null>(null);
-  const [quizProgress, setQuizProgress] = useState<Record<string, QuizProgressState>>({});
-  const [writingProgress, setWritingProgress] = useState<Record<string, WritingProgressState>>({});
+  const [quizProgress, setQuizProgress] = useState<Record<string, QuizProgressState>>(() => 
+    loadProgressFromStorage(STORAGE_KEY_QUIZ, {})
+  );
+  const [writingProgress, setWritingProgress] = useState<Record<string, WritingProgressState>>(() =>
+    loadProgressFromStorage(STORAGE_KEY_WRITING, {})
+  );
 
   const ensureQuizProgress = useCallback((lesson: Lesson) => {
     setQuizProgress(prev => {
@@ -206,10 +275,37 @@ const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
     const trimmed = response.trim();
     const wordCount = countWords(response);
 
+    const calculateMetrics = (text: string, isCorrect: boolean, keywordMatch: number = 100): WritingMetrics => {
+      const targetWords = exercise.wordCountTarget ?? 20;
+      const lengthScore = Math.min(100, (wordCount / targetWords) * 100);
+      
+      return {
+        accuracy: isCorrect ? 100 : 0,
+        keywordCoverage: keywordMatch,
+        lengthScore: Math.round(lengthScore),
+        vocabularyScore: Math.round(calculateVocabularyScore(text)),
+        grammarScore: Math.round(calculateGrammarScore(text)),
+      };
+    };
+
+    const calculateOverallScore = (metrics: WritingMetrics): number => {
+      const weighted = (
+        metrics.accuracy * 0.35 +
+        metrics.keywordCoverage * 0.25 +
+        metrics.lengthScore * 0.15 +
+        metrics.vocabularyScore * 0.15 +
+        metrics.grammarScore * 0.10
+      );
+      return Math.round(weighted);
+    };
+
     if (!trimmed) {
+      const metrics = calculateMetrics('', false, 0);
       return {
         status: 'needs-review',
         feedback: 'Digite sua resposta antes de verificar.',
+        score: 0,
+        metrics,
       };
     }
 
@@ -217,22 +313,31 @@ const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
 
     if (mode === 'exact') {
       if (!exercise.expectedAnswer) {
+        const metrics = calculateMetrics(response, false, 50);
         return {
           status: 'needs-review',
           feedback: 'Resposta modelo não disponível para validação automática.',
+          score: calculateOverallScore(metrics),
+          metrics,
         };
       }
 
       if (normalizeText(response) === normalizeText(exercise.expectedAnswer)) {
+        const metrics = calculateMetrics(response, true, 100);
         return {
           status: 'correct',
           feedback: 'Resposta correta! Ótimo trabalho.',
+          score: calculateOverallScore(metrics),
+          metrics,
         };
       }
 
+      const metrics = calculateMetrics(response, false, 50);
       return {
         status: 'needs-review',
         feedback: `Compare com a resposta sugerida: ${exercise.modelAnswer ?? exercise.expectedAnswer}.`,
+        score: calculateOverallScore(metrics),
+        metrics,
       };
     }
 
@@ -240,38 +345,54 @@ const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
       const keywords = exercise.keywords ?? [];
       const normalizedResponse = normalizeText(response);
       const missingKeywords = keywords.filter(keyword => !normalizedResponse.includes(normalizeText(keyword)));
+      const keywordCoverage = keywords.length > 0 ? ((keywords.length - missingKeywords.length) / keywords.length) * 100 : 100;
 
       if (missingKeywords.length === 0) {
         if (exercise.wordCountTarget && wordCount < exercise.wordCountTarget) {
+          const metrics = calculateMetrics(response, false, keywordCoverage);
           return {
             status: 'needs-review',
             feedback: `Inclua ao menos ${exercise.wordCountTarget} palavras. Você escreveu ${wordCount}.`,
+            score: calculateOverallScore(metrics),
+            metrics,
           };
         }
 
+        const metrics = calculateMetrics(response, true, keywordCoverage);
         return {
           status: 'correct',
           feedback: 'Excelente! Você utilizou todas as expressões-chave.',
+          score: calculateOverallScore(metrics),
+          metrics,
         };
       }
 
+      const metrics = calculateMetrics(response, false, keywordCoverage);
       return {
         status: 'needs-review',
         feedback: `Inclua também: ${missingKeywords.join(', ')}.`,
+        score: calculateOverallScore(metrics),
+        metrics,
       };
     }
 
     const targetWords = exercise.wordCountTarget ?? 0;
     if (targetWords > 0 && wordCount < targetWords) {
+      const metrics = calculateMetrics(response, false, 70);
       return {
         status: 'needs-review',
         feedback: `Escreva pelo menos ${targetWords} palavras. Você escreveu ${wordCount}.`,
+        score: calculateOverallScore(metrics),
+        metrics,
       };
     }
 
+    const metrics = calculateMetrics(response, false, 80);
     return {
       status: 'needs-review',
       feedback: 'Boa resposta! Envie para revisão do professor ou compare com o modelo sugerido.',
+      score: calculateOverallScore(metrics),
+      metrics,
     };
   }, []);
 
@@ -291,11 +412,15 @@ const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
       const statuses = [...baseState.statuses];
       const feedback = [...baseState.feedback];
       const wordCounts = [...baseState.wordCounts];
+      const scores = [...baseState.scores];
+      const metrics = [...baseState.metrics];
 
       responses[exerciseIndex] = value;
       statuses[exerciseIndex] = 'pending';
       feedback[exerciseIndex] = '';
       wordCounts[exerciseIndex] = countWords(value);
+      scores[exerciseIndex] = 0;
+      metrics[exerciseIndex] = { accuracy: 0, keywordCoverage: 0, lengthScore: 0, vocabularyScore: 0, grammarScore: 0 };
 
       const completed = statuses.every(status => status === 'correct');
 
@@ -306,6 +431,8 @@ const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
           statuses,
           feedback,
           wordCounts,
+          scores,
+          metrics,
           completed,
         },
       };
@@ -328,10 +455,14 @@ const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
       const statuses = [...baseState.statuses];
       const feedback = [...baseState.feedback];
       const wordCounts = [...baseState.wordCounts];
+      const scores = [...baseState.scores];
+      const metrics = [...baseState.metrics];
 
       const evaluation = evaluateWritingResponse(lesson.writingExercises[exerciseIndex], responses[exerciseIndex] ?? '');
       statuses[exerciseIndex] = evaluation.status;
       feedback[exerciseIndex] = evaluation.feedback;
+      scores[exerciseIndex] = evaluation.score;
+      metrics[exerciseIndex] = evaluation.metrics;
 
       const completed = statuses.every(status => status === 'correct');
 
@@ -342,6 +473,8 @@ const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
           statuses,
           feedback,
           wordCounts,
+          scores,
+          metrics,
           completed,
         },
       };
@@ -468,6 +601,14 @@ const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
       ensureWritingProgress(selectedLesson);
     }
   }, [selectedLesson, ensureQuizProgress, ensureWritingProgress]);
+
+  useEffect(() => {
+    saveProgressToStorage(STORAGE_KEY_QUIZ, quizProgress);
+  }, [quizProgress]);
+
+  useEffect(() => {
+    saveProgressToStorage(STORAGE_KEY_WRITING, writingProgress);
+  }, [writingProgress]);
 
   useEffect(() => {
     if (activeTab !== 'interpretation') {
@@ -1436,6 +1577,8 @@ const WritingSection: React.FC<WritingSectionProps> = ({
             const status = progress.statuses[index] ?? 'pending';
             const feedback = progress.feedback[index] ?? '';
             const wordCount = progress.wordCounts[index] ?? countWords(response);
+            const score = progress.scores[index] ?? 0;
+            const metrics = progress.metrics[index] ?? { accuracy: 0, keywordCoverage: 0, lengthScore: 0, vocabularyScore: 0, grammarScore: 0 };
 
             const statusClasses =
               status === 'correct'
@@ -1506,11 +1649,47 @@ const WritingSection: React.FC<WritingSectionProps> = ({
                 </div>
 
                 {feedback && (
-                  <div className="mt-4 rounded-lg bg-gray-900/60 p-4 text-sm text-gray-200">
-                    <strong className="block text-white">
-                      {status === 'correct' ? '✅ Excelente!' : '📝 Ajuste sugerido'}
-                    </strong>
-                    <p className="mt-2 text-gray-300">{feedback}</p>
+                  <div className="mt-4 space-y-3 rounded-lg bg-gray-900/60 p-4 text-sm">
+                    <div className="flex items-center justify-between">
+                      <strong className="text-white">
+                        {status === 'correct' ? '✅ Excelente!' : '📝 Ajuste sugerido'}
+                      </strong>
+                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${score >= 80 ? 'bg-emerald-500/20 text-emerald-200' : score >= 60 ? 'bg-amber-500/20 text-amber-200' : 'bg-rose-500/20 text-rose-200'}`}>
+                        Pontuação: {score}/100
+                      </span>
+                    </div>
+                    
+                    <p className="text-gray-300">{feedback}</p>
+
+                    {score > 0 && (
+                      <details className="group">
+                        <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-gray-400 hover:text-white">
+                          Ver métricas detalhadas
+                        </summary>
+                        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                          <div className="rounded-md bg-gray-800/70 p-3">
+                            <div className="text-xs text-gray-400">Precisão</div>
+                            <div className="mt-1 text-lg font-bold text-white">{metrics.accuracy}%</div>
+                          </div>
+                          <div className="rounded-md bg-gray-800/70 p-3">
+                            <div className="text-xs text-gray-400">Palavras-chave</div>
+                            <div className="mt-1 text-lg font-bold text-white">{Math.round(metrics.keywordCoverage)}%</div>
+                          </div>
+                          <div className="rounded-md bg-gray-800/70 p-3">
+                            <div className="text-xs text-gray-400">Comprimento</div>
+                            <div className="mt-1 text-lg font-bold text-white">{metrics.lengthScore}%</div>
+                          </div>
+                          <div className="rounded-md bg-gray-800/70 p-3">
+                            <div className="text-xs text-gray-400">Vocabulário</div>
+                            <div className="mt-1 text-lg font-bold text-white">{metrics.vocabularyScore}%</div>
+                          </div>
+                          <div className="rounded-md bg-gray-800/70 p-3">
+                            <div className="text-xs text-gray-400">Gramática</div>
+                            <div className="mt-1 text-lg font-bold text-white">{metrics.grammarScore}%</div>
+                          </div>
+                        </div>
+                      </details>
+                    )}
                   </div>
                 )}
               </article>
@@ -1522,14 +1701,65 @@ const WritingSection: React.FC<WritingSectionProps> = ({
   );
 };
 
-const PronunciationSection: React.FC = () => (
-  <div className="text-center py-12">
-    <Mic className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-    <h3 className="text-2xl font-bold text-gray-400 mb-2">Testes de Pronúncia</h3>
-    <p className="text-gray-500">
-      Sistema de análise com openSMILE em desenvolvimento.
-    </p>
-  </div>
-);
+const PronunciationSection: React.FC = () => {
+  const [selectedPhraseIndex, setSelectedPhraseIndex] = useState(0);
+  
+  // Sample pronunciation phrases
+  const phrases = [
+    { id: 'greeting', text: 'Hello everyone, let us break the ice with a quick game.' },
+    { id: 'intro', text: 'My name is Emma and I love reading books.' },
+    { id: 'hobby', text: 'What do you like to do in your free time?' },
+    { id: 'question', text: 'Have you ever tried learning a new language?' },
+    { id: 'expression', text: 'That sounds like a lot of fun!' },
+  ];
+  
+  const currentPhrase = phrases[selectedPhraseIndex];
+
+  return (
+    <div className="space-y-6">
+      <div className="text-center">
+        <h2 className="text-3xl font-bold text-white mb-2">Teste de Pronúncia</h2>
+        <p className="text-gray-400">Pratique sua pronúncia com feedback em tempo real</p>
+      </div>
+
+      {/* Phrase selector */}
+      <div className="flex flex-wrap justify-center gap-2">
+        {phrases.map((phrase, index) => (
+          <button
+            key={phrase.id}
+            onClick={() => setSelectedPhraseIndex(index)}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+              selectedPhraseIndex === index
+                ? 'bg-emerald-600 text-white'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            Frase {index + 1}
+          </button>
+        ))}
+      </div>
+
+      {/* Pronunciation test component */}
+      <PronunciationTest
+        key={currentPhrase.id}
+        phrase={currentPhrase.text}
+        phraseId={currentPhrase.id}
+        onComplete={(score) => console.log(`Phrase ${currentPhrase.id} completed with score:`, score)}
+      />
+
+      {/* Instructions */}
+      <div className="rounded-xl bg-gray-800/60 border border-gray-700 p-4">
+        <h4 className="font-semibold text-white mb-2">📋 Como funciona:</h4>
+        <ol className="space-y-1 text-sm text-gray-300 list-decimal list-inside">
+          <li>Ouça a pronúncia nativa clicando no botão azul</li>
+          <li>Clique em "Gravar minha pronúncia" e fale a frase</li>
+          <li>Clique em "Parar gravação" quando terminar</li>
+          <li>Aguarde a análise automática com openSMILE</li>
+          <li>Receba feedback detalhado sobre sua pronúncia</li>
+        </ol>
+      </div>
+    </div>
+  );
+};
 
 export default LicoesView;

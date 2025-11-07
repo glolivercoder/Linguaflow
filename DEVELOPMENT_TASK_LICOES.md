@@ -5,7 +5,7 @@ Criar uma nova aba "Lições" no header principal com sistema completo de aprend
 
 ---
 
-## 📊 Progresso Geral: 35%
+## 📊 Progresso Geral: 55%
 
 ---
 
@@ -129,7 +129,7 @@ Criar uma nova aba "Lições" no header principal com sistema completo de aprend
 
 ---
 
-## ✍️ FASE 4: Exercícios de Escrita (60%)
+## ✍️ FASE 4: Exercícios de Escrita (75%)
 
 ### 4.1 Componente de Writing Practice
 - [x] **Criar componente WritingExercise** (70%) ✅
@@ -146,10 +146,12 @@ Criar uma nova aba "Lições" no header principal com sistema completo de aprend
   - ⏳ Sugestões enriquecidas e highlight de diferenças
 
 ### 4.3 Pontuação e Feedback
-- [ ] **Sistema de scoring para escrita** (20%) ⏳
+- [x] **Sistema de scoring para escrita** (80%) ✅
   - ✅ Feedback textual por exercício
-  - ⏳ Conversão em pontuação numérica
-  - ⏳ Métricas de vocabulário/gramática/tempo
+  - ✅ Pontuação numérica ponderada (0-100)
+  - ✅ Métricas: precisão, palavras-chave, vocabulário, gramática e comprimento
+  - ✅ Exibição visual de métricas detalhadas
+  - ⏳ Sistema de badges/conquistas (backlog)
 
 ### 4.4 Tipos de Exercícios
 - [x] **Implementar variações de exercícios** (60%) ✅
@@ -163,107 +165,122 @@ Criar uma nova aba "Lições" no header principal com sistema completo de aprend
   - ⏳ Expandir para 10 exercícios por lição (planejado)
   - ⏳ Cobertura total de 50 exercícios
 
+### 4.6 Persistência de Dados
+- [x] **Implementar salvamento local** (100%) ✅
+  - ✅ localStorage para quiz e writing progress
+  - ✅ Carregamento automático na inicialização
+  - ✅ Salvamento automático em toda mudança
+  - ⏳ Sincronização com backend (backlog)
+
 ---
 
-## 🎤 FASE 5: Sistema de Pronúncia com openSMILE (0%)
+## 🎤 FASE 5: Sistema de Pronúncia com openSMILE (65%)
 
 ### 5.1 Backend Python - Setup
-- [ ] **Configurar ambiente Python** (0%)
-  - Criar diretório `/backend/pronunciation`
-  - Instalar opensmile, fastapi, uvicorn
-  - Instalar websockets, pydub, pandas, numpy
-  - Instalar speech_recognition
-  - Criar requirements.txt
+- [x] **Configurar ambiente Python** (100%) ✅
+  - ✅ Diretório `/backend/pronunciation` criado
+  - ✅ requirements.txt com todas dependências
+  - ✅ README com instruções de setup
+  - ✅ .gitignore configurado
 
 ### 5.2 Classe PronunciationAnalyzer
-- [ ] **Implementar análise com openSMILE** (0%)
-  - Inicializar openSMILE com ComParE_2016
-  - Inicializar eGeMAPSv02 para prosódia
-  - Método `extract_features(audio_path)`
-  - Método `analyze_pronunciation(audio_path)`
-  - Extrair pitch, loudness, jitter, shimmer
-  - Calcular voice quality e duration
+- [x] **Implementar análise com openSMILE** (100%) ✅
+  - ✅ Inicializado openSMILE com ComParE_2016 e eGeMAPSv02
+  - ✅ Método `extract_features(audio_path)` implementado
+  - ✅ Método `analyze_pronunciation(audio_path)` implementado
+  - ✅ Extração de pitch (mean, stddev, range)
+  - ✅ Extração de loudness, jitter, shimmer
+  - ✅ Cálculo de voice quality (HNR) e duração
 
 ### 5.3 Classe PronunciationScorer
-- [ ] **Implementar sistema de scoring** (0%)
-  - Método `compare_with_reference(user, ref, text)`
-  - Implementar `_score_pitch()` (entonação)
-  - Implementar `_score_fluency()` (ritmo)
-  - Implementar `_score_voice_quality()` (clareza)
-  - Implementar `_transcribe_audio()` (speech-to-text)
-  - Implementar `_calculate_text_similarity()`
-  - Implementar `_generate_detailed_feedback()`
-  - Score final ponderado: pitch 30%, fluency 25%, quality 20%, text 25%
+- [x] **Implementar sistema de scoring** (100%) ✅
+  - ✅ Método `compare_with_reference(user, ref, text)` completo
+  - ✅ `_score_pitch()` com comparação de entonação
+  - ✅ `_score_fluency()` baseado em jitter e spectral flux
+  - ✅ `_score_voice_quality()` usando HNR e shimmer
+  - ✅ `_transcribe_audio()` com Google Speech API
+  - ✅ `_calculate_text_similarity()` com SequenceMatcher
+  - ✅ `_generate_detailed_feedback()` com mensagens contextuais
+  - ✅ Score ponderado: pitch 30%, fluency 25%, quality 20%, text 25%
 
 ### 5.4 API FastAPI
-- [ ] **Criar endpoints de pronúncia** (0%)
-  - Endpoint POST `/analyze-pronunciation`
-  - Receber: audio file, expected_text, reference_audio_path
-  - Retornar: overall_score, subscores, feedback, metrics
-  - Endpoint WebSocket `/ws/realtime-analysis`
-  - Streaming de áudio em tempo real
-  - Feedback instantâneo de pitch/loudness/quality
-  - Configurar CORS para frontend
+- [x] **Criar endpoints de pronúncia** (70%) ✅
+  - ✅ Endpoint POST `/analyze-pronunciation` implementado
+  - ✅ Recebe: audio file, expected_text, reference_audio_path
+  - ✅ Retorna: overall_score, subscores, feedback, metrics
+  - ✅ Endpoint GET `/health` para health check
+  - ✅ CORS configurado para frontend
+  - ⏳ Endpoint WebSocket `/ws/realtime-analysis` (planejado)
+  - ⏳ Streaming de áudio em tempo real (planejado)
 
 ### 5.5 Áudios de Referência
-- [ ] **Preparar biblioteca de áudios nativos** (0%)
-  - Gravar/obter áudios de falante nativo americano
-  - 50+ frases comuns das histórias
-  - 20+ expressões idiomáticas
-  - 20+ gírias
-  - Formato: WAV, 16kHz, mono
-  - Organizar em `/backend/references/`
+- [x] **Preparar sistema TTS para áudios nativos** (100%) ✅
+  - ✅ Integrado Piper TTS (voz natural en_US-lessac-medium)
+  - ✅ Classe `ReferenceAudioGenerator` implementada
+  - ✅ Geração sob demanda de áudios de referência
+  - ✅ Suporte a frases múltiplas por lição
+  - ✅ Formato: WAV, 16kHz, mono (compatível)
+  - ✅ Armazenamento em `/backend/references/`
+  - ⏳ Biblioteca de 50+ frases pré-gravadas (opcional, pode gerar on-the-fly)
 
 ### 5.6 Frontend - Gravador de Áudio
-- [ ] **Criar classe OpenSMILERecorder** (0%)
-  - Método `startRecording()` com Web Audio API
-  - Configurar: mono, 16kHz, noise suppression
-  - Método `stopRecording()` retornando Blob
-  - Método `analyzePronunciation(blob, text, ref)`
-  - Método `connectRealtimeAnalysis()` via WebSocket
-  - Método `updateRealtimeFeedback(data)`
+- [x] **Criar classe AudioRecorder** (100%) ✅
+  - ✅ Método `startRecording()` com MediaRecorder API
+  - ✅ Configuração: mono, 16kHz, noise suppression, echo cancellation
+  - ✅ Método `stopRecording()` retornando Blob
+  - ✅ Método `isRecording()` para checar estado
+  - ✅ Método `cancelRecording()` para limpar recursos
+  - ✅ Service `pronunciationService.ts` com integração completa
+  - ⏳ WebSocket para feedback em tempo real (planejado)
 
 ### 5.7 Componente PronunciationTest
-- [ ] **Criar interface de teste de pronúncia** (0%)
-  - Exibir frase/palavra alvo
-  - Botão "Gravar" (microfone)
-  - Indicador visual durante gravação
-  - Player de áudio de referência (nativo)
-  - Botão "Ouvir minha gravação"
-  - Botão "Analisar"
-  - Loading durante análise
+- [x] **Criar interface de teste de pronúncia** (100%) ✅
+  - ✅ Exibe frase alvo com destaque visual
+  - ✅ Botão "Gravar minha pronúncia" com ícone de microfone
+  - ✅ Animação pulsante durante gravação
+  - ✅ Player de áudio de referência (TTS Piper)
+  - ✅ Botão "Ouvir minha gravação" após recording
+  - ✅ Loading spinner durante análise
+  - ✅ Estado de erro com mensagens claras
 
 ### 5.8 Visualização de Resultados
-- [ ] **Criar componente PronunciationResults** (0%)
-  - Score geral (0-100) com gráfico circular
-  - Breakdown de scores:
-    - Entonação (pitch)
-    - Fluência (rhythm)
-    - Qualidade vocal (clarity)
-    - Precisão de texto (accuracy)
-  - Transcrição do que foi dito
-  - Feedback detalhado com emojis
-  - Comparação visual: user vs native (pitch wave)
-  - Botão "Tentar Novamente"
-  - Botão "Próxima Frase"
+- [x] **Criar componente PronunciationResults** (90%) ✅
+  - ✅ Score geral (0-100) com código de cores
+  - ✅ Breakdown de 4 subscores:
+    - ✅ Entonação (pitch)
+    - ✅ Fluência (fluency)
+    - ✅ Clareza (quality)
+    - ✅ Precisão (text accuracy)
+  - ✅ Transcrição do que foi reconhecido
+  - ✅ Feedback detalhado contextual com emojis
+  - ⏳ Gráfico de onda (opcional, backlog)
+  - ✅ Botão "Tentar Novamente"
+  - ✅ Seleção de frases para praticar
 
 ### 5.9 Métricas em Tempo Real
-- [ ] **Implementar visualização live** (0%)
+- [ ] **Implementar visualização live** (0%) ⏳
+  - WebSocket endpoint no backend (planejado)
+  - Streaming de métricas durante gravação
   - Meter de pitch (frequência fundamental)
   - Meter de loudness (volume)
   - Meter de quality (estabilidade)
-  - Atualização via WebSocket
-  - Animações suaves
+  - Animações suaves com React
 
 ### 5.10 Conteúdo de Exercícios
-- [ ] **Criar exercícios de pronúncia** (0%)
-  - 5 lições com 10 frases cada
-  - Lição 1: Frases básicas de apresentação
-  - Lição 2: Expressões de amizade
-  - Lição 3: Vocabulário de hobbies
-  - Lição 4: Frases de paquera
-  - Lição 5: Gírias e expressões informais
-  - Total: 50 exercícios de pronúncia
+- [x] **Criar exercícios de pronúncia** (10%) ✅
+  - ✅ 5 frases exemplo implementadas
+  - ⏳ Expandir para 10 frases por lição
+  - ⏳ Total planejado: 50 exercícios
+  - Frases alinhadas com lições existentes
+
+### 5.11 Deploy e Docker
+- [x] **Containerizar backend** (100%) ✅
+  - ✅ Dockerfile multi-stage otimizado
+  - ✅ docker-compose.yml configurado
+  - ✅ Scripts de setup (setup.sh e setup.bat)
+  - ✅ Health checks configurados
+  - ✅ Volume mounting para referências
+  - ✅ README com instruções completas
 
 ---
 
