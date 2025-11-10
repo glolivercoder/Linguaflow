@@ -20,6 +20,7 @@ const PronunciationTest: React.FC<PronunciationTestProps> = ({ phrase, phraseId,
   const [error, setError] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [referenceAudioPath, setReferenceAudioPath] = useState<string | null>(null);
+  const [referenceAudioUrl, setReferenceAudioUrl] = useState<string | null>(null);
   const [isGeneratingReference, setIsGeneratingReference] = useState(false);
   
   const recorderRef = useRef<AudioRecorder | null>(null);
@@ -44,10 +45,12 @@ const PronunciationTest: React.FC<PronunciationTestProps> = ({ phrase, phraseId,
     try {
       const response = await generateReferenceAudio(phrase);
       setReferenceAudioPath(response.audio_path);
+      setReferenceAudioUrl(response.audio_url ?? null);
     } catch (err) {
       console.error('Failed to generate reference:', err);
       const errorMsg = err instanceof Error ? err.message : 'Falha ao gerar áudio de referência';
       setError(`⚠️ ${errorMsg}. Você ainda pode gravar sua pronúncia.`);
+      setReferenceAudioUrl(null);
       // Continue without reference - user can still record
     } finally {
       setIsGeneratingReference(false);
@@ -121,7 +124,7 @@ const PronunciationTest: React.FC<PronunciationTestProps> = ({ phrase, phraseId,
     if (referencePlayerRef.current && referenceAudioPath) {
       // Extract filename from path (e.g., "references/ref_hello.mp3" -> "ref_hello.mp3")
       const filename = referenceAudioPath.split('/').pop() || referenceAudioPath;
-      const fullPath = `http://localhost:8000/references/${filename}`;
+      const fullPath = referenceAudioUrl ?? `http://localhost:8000/references/${filename}`;
       referencePlayerRef.current.src = fullPath;
       referencePlayerRef.current.play();
     }

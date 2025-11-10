@@ -3,16 +3,17 @@ FastAPI Backend SIMPLIFICADO para Pronunciation Analysis
 Versão sem openSMILE para facilitar setup no Windows
 """
 
+import logging
+import os
+import tempfile
+from pathlib import Path
+from typing import Optional
+
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import Optional
-import logging
-import tempfile
-import os
-from pathlib import Path
 from gtts import gTTS
 import speech_recognition as sr
 from difflib import SequenceMatcher
@@ -21,12 +22,33 @@ from difflib import SequenceMatcher
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+DEFAULT_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3003",
+]
+
+
+def get_allowed_origins() -> list[str]:
+    env_origins = os.getenv("ALLOWED_ORIGINS", "").strip()
+
+    if env_origins:
+        origins = [origin.strip() for origin in env_origins.split(",") if origin.strip()]
+        if origins:
+            logger.info("Using CORS origins from ALLOWED_ORIGINS: %s", origins)
+            return origins
+
+    logger.info("Using default CORS origins: %s", DEFAULT_ALLOWED_ORIGINS)
+    return DEFAULT_ALLOWED_ORIGINS
+
+
 app = FastAPI(title="LinguaFlow Pronunciation API (Simple)", version="1.0.0")
 
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://localhost:3003"],
+    allow_origins=get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

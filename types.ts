@@ -29,6 +29,7 @@ export interface Settings {
   nativeLanguage: LanguageCode;
   learningLanguage: LanguageCode;
   voiceGender: VoiceGender;
+  piperVoiceModel?: string;
 }
 
 export type View = 'conversation' | 'flashcards' | 'settings' | 'anki' | 'smartLearn' | 'licoes';
@@ -37,6 +38,13 @@ export type View = 'conversation' | 'flashcards' | 'settings' | 'anki' | 'smartL
 // --- New types for Predefined Flashcard Data ---
 
 export type MultilingualText = Partial<Record<LanguageCode, string>>;
+
+export interface VoiceModelInfo {
+  key: string;
+  language: string;
+  quality?: string | null;
+  file_path: string;
+}
 
 export interface RawCard {
     id: string;

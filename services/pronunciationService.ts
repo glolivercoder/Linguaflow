@@ -4,6 +4,8 @@
 
 const API_BASE_URL = 'http://localhost:8000';
 
+import type { VoiceModelInfo } from '../types';
+
 export interface PronunciationResult {
   overall_score: number;
   pitch_score: number;
@@ -19,7 +21,9 @@ export interface PronunciationResult {
 export interface ReferenceAudioResult {
   status: string;
   audio_path: string;
+  audio_url?: string;
   text: string;
+  voice_model?: string;
 }
 
 /**
@@ -54,9 +58,12 @@ export async function analyzePronunciation(
 /**
  * Generate reference audio using TTS
  */
-export async function generateReferenceAudio(text: string): Promise<ReferenceAudioResult> {
+export async function generateReferenceAudio(text: string, voiceModelPath?: string): Promise<ReferenceAudioResult> {
   const formData = new FormData();
   formData.append('text', text);
+  if (voiceModelPath) {
+    formData.append('voice_model', voiceModelPath);
+  }
 
   const response = await fetch(`${API_BASE_URL}/generate-reference`, {
     method: 'POST',
@@ -66,6 +73,29 @@ export async function generateReferenceAudio(text: string): Promise<ReferenceAud
   if (!response.ok) {
     const error = await response.json();
     throw new Error(error.detail || 'Reference generation failed');
+  }
+
+  const data: ReferenceAudioResult = await response.json();
+
+  if (data.audio_url) {
+    try {
+      data.audio_url = new URL(data.audio_url, API_BASE_URL).toString();
+    } catch (error) {
+      console.warn('Failed to build audio URL from response.', error);
+    }
+  }
+
+  return data;
+}
+
+/**
+ * List available Piper voice models on the server
+ */
+export async function listVoiceModels(): Promise<VoiceModelInfo[]> {
+  const response = await fetch(`${API_BASE_URL}/voice-models`);
+
+  if (!response.ok) {
+    throw new Error('Failed to load Piper voice models');
   }
 
   return response.json();

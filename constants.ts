@@ -29,4 +29,5 @@ export const DEFAULT_SETTINGS: Settings = {
   nativeLanguage: 'pt-BR',
   learningLanguage: 'en-US',
   voiceGender: 'female',
+  piperVoiceModel: 'en_US-lessac-medium',
 };

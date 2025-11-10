@@ -104,22 +104,96 @@ uvicorn main_simple:app --host 0.0.0.0 --port 8000 --reload
 
 ---
 
-## ⭐ Versão Completa (Futura)
+## ⭐ Versão Completa com Docker (RECOMENDADA)
 
-Para a versão completa com openSMILE:
-- Usar Linux ou WSL2
-- Instalar dependências nativas
-- Seguir instruções em `backend/pronunciation/README.md`
+### 🐳 Backend com Piper1-GPL + openSMILE
+
+A versão completa agora usa **Piper1-GPL** oficial e **openSMILE** via Docker!
+
+**Vantagens:**
+- ✅ TTS de alta qualidade (Piper1-GPL compilado do fonte)
+- ✅ Análise acústica profissional (openSMILE)
+- ✅ Funciona perfeitamente no Windows via WSL2
+- ✅ Isolado e fácil de gerenciar
+
+### Iniciar Backend Docker
+
+```bash
+cd backend/pronunciation
+INICIAR_PRONUNCIATION.bat
+```
+
+Ou manualmente:
+
+```bash
+cd backend/pronunciation
+docker compose build
+docker compose up -d
+```
+
+### Verificar Status
+
+- API: http://localhost:8000
+- Docs: http://localhost:8000/docs
+- Health: http://localhost:8000/health
+
+### Ver Logs
+
+```bash
+cd backend/pronunciation
+docker compose logs -f
+```
+
+### Parar Backend
+
+```bash
+cd backend/pronunciation
+docker compose down
+```
 
 ---
 
 ## 📝 Arquivos Importantes
 
+### Backend Docker (Versão Completa)
+- **Dockerfile**: `backend/pronunciation/Dockerfile`
+- **Docker Compose**: `backend/pronunciation/docker-compose.yml`
+- **Main API**: `backend/pronunciation/main.py`
+- **Piper1-GPL Generator**: `backend/pronunciation/reference_audio_generator.py`
+- **openSMILE Analyzer**: `backend/pronunciation/pronunciation_analyzer.py`
+- **Documentação**: `backend/pronunciation/README_PIPER_GPL.md`
+
+### Backend Simplificado (Alternativo)
 - **Backend Simplificado**: `backend/pronunciation/main_simple.py`
 - **Dependências Simples**: `backend/pronunciation/requirements-simple.txt`
-- **Frontend**: `components/PronunciationTest.tsx`
+
+### Frontend
+- **Componente**: `components/PronunciationTest.tsx`
 - **Service**: `services/pronunciationService.ts`
 
 ---
 
-🎉 **Pronto para testar!** Qualquer dúvida, consulte a documentação ou peça ajuda.
+## 🔄 Escolher Versão
+
+### Usar Docker (Recomendado)
+```bash
+# No backend/pronunciation
+docker compose up -d
+```
+API em: http://localhost:8000
+
+### Usar Versão Simples (Alternativa)
+```bash
+cd backend/pronunciation
+pip install -r requirements-simple.txt
+uvicorn main_simple:app --host 0.0.0.0 --port 8000 --reload
+```
+API em: http://localhost:8000
+
+---
+
+🎉 **Sistema atualizado com Piper1-GPL!** 
+
+📖 Consulte `backend/pronunciation/README_PIPER_GPL.md` para documentação completa.
+
+💡 **Dica**: A versão Docker oferece melhor qualidade e é mais fácil de manter!

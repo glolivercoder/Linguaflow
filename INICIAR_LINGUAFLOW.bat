@@ -13,7 +13,7 @@ REM Verificar se Python esta instalado
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo ❌ ERRO: Python nao encontrado!
-    echo Por favor, instale Python 3.11+ antes de continuar.
+    echo Por favor, instale Python 3.11 ou superior.
     pause
     exit /b 1
 )
@@ -35,38 +35,64 @@ REM Criar diretorio de logs
 if not exist logs mkdir logs
 
 REM ========================================
-REM 1. INICIAR BACKEND DE PRONUNCIA
+REM 1. INICIAR BACKEND DE PRONUNCIA (VENV)
 REM ========================================
-echo [1/2] Iniciando Backend de Pronuncia (Python)...
+echo [1/2] Iniciando Backend de Pronuncia (Python venv + Piper TTS)...
 echo.
 
 cd backend\pronunciation
 
-REM Verificar se venv existe
+REM Verificar se ambiente virtual existe
 if not exist venv (
-    echo ⚠️  Virtual environment nao encontrado!
-    echo Executando setup automatico...
-    call setup.bat
-    if %errorlevel% neq 0 (
-        echo ❌ Falha no setup do backend
-        pause
-        exit /b 1
-    )
+    echo ❌ ERRO: Ambiente virtual nao encontrado!
+    echo Execute primeiro: backend\pronunciation\setup_piper_venv.bat
+    pause
+    cd ..\..
+    exit /b 1
 )
 
-REM Ativar venv e iniciar backend
-start "LinguaFlow Backend" cmd /k "venv\Scripts\activate && echo ✅ Backend iniciado em http://localhost:8000 && uvicorn main_simple:app --host 0.0.0.0 --port 8000 --reload"
+REM Garantir diretorios persistentes
+if not exist references mkdir references
+if not exist temp mkdir temp
+if not exist models mkdir models
 
-echo ✅ Backend iniciado!
-echo    URL: http://localhost:8000
-echo    Docs: http://localhost:8000/docs
+echo Verificando ambiente virtual...
+call venv\Scripts\activate.bat
+
+REM Verificar se piper-tts esta instalado
+python -c "import piper" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo ❌ ERRO: Piper TTS nao encontrado no ambiente virtual!
+    echo Execute: backend\pronunciation\setup_piper_venv.bat
+    pause
+    cd ..\..
+    exit /b 1
+)
+
+echo ✅ Piper TTS encontrado no venv
 echo.
+
+REM Verificar modelos
+set MODEL_FOUND=0
+if exist "models\*.onnx" set MODEL_FOUND=1
+if exist "F:\Projetos2025BKP\PipperTTS\piper\trained_models" set MODEL_FOUND=1
+
+if %MODEL_FOUND%==0 (
+    echo ⚠️  AVISO: Nenhum modelo Piper encontrado!
+    echo Copie modelos para backend\pronunciation\models
+    echo Ou use os do PipperTTS em: F:\Projetos2025BKP\PipperTTS\piper\trained_models
+    echo.
+)
+
+REM Iniciar servidor FastAPI em nova janela
+echo Iniciando servidor FastAPI...
+start "LinguaFlow Pronunciation API" cmd /k "cd /d %CD% && venv\Scripts\activate && python main.py"
 
 cd ..\..
 
 REM Aguardar backend inicializar
-echo Aguardando backend inicializar (5 segundos)...
-timeout /t 5 /nobreak >nul
+echo Aguardando backend inicializar (8 segundos)...
+timeout /t 8 /nobreak >nul
 
 REM Verificar se backend esta respondendo
 echo Verificando saude do backend...
@@ -75,6 +101,7 @@ if %errorlevel% equ 0 (
     echo ✅ Backend respondendo corretamente!
 ) else (
     echo ⚠️  Backend pode nao estar pronto ainda...
+    echo    Aguarde mais alguns segundos e verifique: http://localhost:8000/health
 )
 echo.
 
@@ -97,10 +124,10 @@ if not exist node_modules (
 )
 
 REM Iniciar frontend
-start "LinguaFlow Frontend" cmd /k "echo ✅ Frontend iniciado em http://localhost:5173 && npm run dev"
+start "LinguaFlow Frontend" cmd /k "echo ✅ Frontend iniciado em http://localhost:3001 && npm run dev"
 
 echo ✅ Frontend iniciado!
-echo    URL: http://localhost:5173
+echo    URL: http://localhost:3001
 echo.
 
 REM Aguardar frontend inicializar
@@ -111,7 +138,7 @@ REM ========================================
 REM 3. ABRIR NAVEGADOR
 REM ========================================
 echo Abrindo navegador...
-start http://localhost:5173
+start http://localhost:3001
 
 echo.
 echo ========================================
@@ -120,7 +147,7 @@ echo ========================================
 echo.
 echo 📡 Servidores ativos:
 echo    Backend:  http://localhost:8000
-echo    Frontend: http://localhost:5173
+echo    Frontend: http://localhost:3001
 echo.
 echo 📋 Para testar pronuncia:
 echo    1. Clique em "Licoes"
@@ -128,12 +155,18 @@ echo    2. Clique em "Pronuncia"
 echo    3. Teste as frases!
 echo.
 echo ⚠️  Para PARAR os servidores:
-echo    - Feche as janelas "LinguaFlow Backend" e "LinguaFlow Frontend"
-echo    - Ou pressione Ctrl+C em cada janela
+echo    - Backend: Feche a janela "LinguaFlow Pronunciation API" ou use Ctrl+C
+echo    - Frontend: Feche a janela "LinguaFlow Frontend" ou use Ctrl+C
 echo.
-echo 📝 Logs disponiveis em:
-echo    - Backend: backend\pronunciation\
-echo    - Frontend: Console do navegador
+echo 📝 Logs e informacoes:
+echo    - Backend: Janela "LinguaFlow Pronunciation API"
+echo    - Frontend: Janela "LinguaFlow Frontend"
+echo    - API Docs: http://localhost:8000/docs
+echo.
+echo 🔧 Troubleshooting:
+echo    - Se backend falhar: Execute backend\pronunciation\setup_piper_venv.bat
+echo    - Teste backend: backend\pronunciation\test_piper_integration.py
+echo    - Documentacao: backend\pronunciation\INICIO_RAPIDO.md
 echo.
 echo Pressione qualquer tecla para sair deste terminal...
 echo (Os servidores continuarao rodando nas outras janelas)

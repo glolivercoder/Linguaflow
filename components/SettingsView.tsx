@@ -1,7 +1,8 @@
 
-import React from 'react';
-import { Settings, VoiceGender, AnkiDeckSummary } from '../types';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Settings, VoiceGender, AnkiDeckSummary, VoiceModelInfo } from '../types';
 import { SUPPORTED_LANGUAGES } from '../constants';
+import { generateReferenceAudio, listVoiceModels } from '../services/pronunciationService';
 
 interface SettingsViewProps {
   settings: Settings;
@@ -13,6 +14,70 @@ interface SettingsViewProps {
 
 const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSettingsChange, onRemoveAnkiDeck, onBack }) => {
   
+  const [voiceModels, setVoiceModels] = useState<VoiceModelInfo[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [testText, setTestText] = useState('Hello everyone! Welcome to LinguaFlow.');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
+  const [generatedModel, setGeneratedModel] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadVoiceModels = async () => {
+      try {
+        setIsLoadingModels(true);
+        setModelsError(null);
+        const models = await listVoiceModels();
+        setVoiceModels(models);
+      } catch (error) {
+        console.error('Failed to load Piper voice models:', error);
+        setModelsError('Não foi possível carregar os modelos de voz do Piper.');
+      } finally {
+        setIsLoadingModels(false);
+      }
+    };
+
+    loadVoiceModels();
+  }, []);
+
+  const handleModelChange = (value: string) => {
+    onSettingsChange({
+      ...settings,
+      piperVoiceModel: value || undefined,
+    });
+  };
+
+  const selectedVoiceLabel = useMemo(() => {
+    if (!settings.piperVoiceModel) {
+      return 'Padrão (en_US-lessac-medium)';
+    }
+    const info = voiceModels.find(model => model.key === settings.piperVoiceModel);
+    if (!info) {
+      return settings.piperVoiceModel;
+    }
+    const languageLabel = info.language?.toUpperCase() ?? 'Idioma desconhecido';
+    const qualityLabel = info.quality ? info.quality.toUpperCase() : 'Qualidade indefinida';
+    return `${info.key} • ${languageLabel} • ${qualityLabel}`;
+  }, [settings.piperVoiceModel, voiceModels]);
+
+  const handleGenerateTestAudio = async () => {
+    try {
+      setIsGenerating(true);
+      setGeneratedUrl(null);
+      setGeneratedModel(null);
+      const response = await generateReferenceAudio(testText, settings.piperVoiceModel ? settings.piperVoiceModel : undefined);
+      if (response.audio_url) {
+        setGeneratedUrl(response.audio_url);
+        setGeneratedModel(response.voice_model ?? settings.piperVoiceModel ?? 'default');
+      }
+    } catch (error) {
+      console.error('Failed to generate test audio:', error);
+      window.alert(error instanceof Error ? error.message : 'Falha ao gerar áudio de teste.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const { name, value } = e.target;
     onSettingsChange({
@@ -90,6 +155,92 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
           <p className="text-xs text-gray-400">
             Sua chave de API do Google Gemini e do Pixabay são configuradas de forma segura através de variáveis de ambiente e não precisam ser inseridas aqui.
           </p>
+        </div>
+
+        <div className="space-y-4 p-4 bg-gray-800 rounded-lg">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-200 mb-2">Piper TTS</h3>
+            <p className="text-xs text-gray-400">
+              Ajuste o modelo de voz do Piper e teste a síntese de voz diretamente do navegador. As alterações são salvas automaticamente nas configurações da conta local.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="piperVoiceModel" className="block text-sm font-medium text-gray-300">
+              Modelo de voz
+            </label>
+            <select
+              id="piperVoiceModel"
+              name="piperVoiceModel"
+              value={settings.piperVoiceModel ?? ''}
+              onChange={event => handleModelChange(event.target.value)}
+              className="w-full bg-gray-700 border-gray-600 rounded-md py-2 px-3 text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+              disabled={isLoadingModels}
+            >
+              <option value="">Padrão (en_US-lessac-medium)</option>
+              {voiceModels.map(model => (
+                <option key={model.key} value={model.key}>
+                  {model.key} • {model.language?.toUpperCase()} {model.quality ? `• ${model.quality}` : ''}
+                </option>
+              ))}
+            </select>
+            {isLoadingModels && (
+              <p className="text-xs text-gray-400">Carregando modelos disponíveis...</p>
+            )}
+            {modelsError && (
+              <p className="text-xs text-rose-400">{modelsError}</p>
+            )}
+            {!isLoadingModels && !modelsError && voiceModels.length === 0 && (
+              <p className="text-xs text-gray-500">Nenhum modelo adicional encontrado. Certifique-se de que os arquivos .onnx estão na pasta <code className="bg-gray-900 px-1 rounded">backend/pronunciation/models</code>.</p>
+            )}
+            <p className="text-xs text-gray-400">Modelo selecionado: {selectedVoiceLabel}</p>
+          </div>
+
+          <div className="space-y-3">
+            <label htmlFor="piperTestText" className="block text-sm font-medium text-gray-300">
+              Texto para teste
+            </label>
+            <textarea
+              id="piperTestText"
+              value={testText}
+              onChange={event => setTestText(event.target.value)}
+              rows={3}
+              className="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+              placeholder="Digite um texto para sintetizar..."
+            />
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleGenerateTestAudio}
+                disabled={isGenerating || !testText.trim()}
+                className="inline-flex items-center gap-2 rounded-md bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-500 disabled:opacity-60"
+              >
+                {isGenerating ? 'Gerando...' : 'Gerar áudio de teste'}
+              </button>
+              {generatedUrl && (
+                <a
+                  href={generatedUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm text-cyan-400 hover:text-cyan-300"
+                >
+                  Abrir áudio gerado ({generatedModel})
+                </a>
+              )}
+            </div>
+
+            {generatedUrl && (
+              <div className="rounded-md border border-gray-700 bg-gray-900 p-3 text-xs text-gray-300">
+                <p>Áudio gerado com sucesso!</p>
+                <p className="mt-1 break-all">URL: {generatedUrl}</p>
+                <p className="mt-1">Modelo utilizado: {generatedModel ?? 'desconhecido'}</p>
+                <audio controls className="mt-2 w-full">
+                  <source src={generatedUrl} type="audio/wav" />
+                  Seu navegador não suporta reprodução de áudio.
+                </audio>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="mt-6 p-4 bg-gray-800 rounded-lg">

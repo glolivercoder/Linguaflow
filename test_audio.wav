@@ -1,0 +1,1 @@
+{"status":"success","audio_path":"references/ref_Hello_everyone.wav","audio_url":"/references/ref_Hello_everyone.wav","text":"Hello everyone","voice_model":"/app/models/en_US-lessac-medium.onnx"}
