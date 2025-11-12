@@ -30,6 +30,7 @@ export interface Settings {
   learningLanguage: LanguageCode;
   voiceGender: VoiceGender;
   piperVoiceModel?: string;
+  preferOfflineTranslation?: boolean;
 }
 
 export type View = 'conversation' | 'flashcards' | 'settings' | 'anki' | 'smartLearn' | 'licoes';

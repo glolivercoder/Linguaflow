@@ -9,161 +9,19 @@ import { SUPPORTED_LANGUAGES, VOICE_CONFIG } from '../constants';
 import * as Icons from './icons';
 import { getPhonetics, translateText, getPronunciationCorrection, getGroundedAnswer } from '../services/geminiService';
 import { PROXY_WS_URL } from '../services/proxyClient';
-
-type CategoryKey = 'immigration' | 'hospital' | 'supermarket' | 'restaurant';
-
-interface QAItem {
-    question: string;
-    answer: string;
-}
-
-interface QASection {
-    type: 'qa';
-    heading: string;
-    items: QAItem[];
-}
-
-interface PhraseSection {
-    type: 'phrases';
-    heading: string;
-    items: string[];
-}
-
-type CategorySection = QASection | PhraseSection;
-
-interface CategoryDefinition {
-    key: CategoryKey;
-    title: string;
-    description: string;
-    roleInstruction: string;
-    kickoffPrompt: string;
-    sections: CategorySection[];
-}
-
-type TranslatedCategories = Record<CategoryKey, CategoryDefinition>;
-
-const CATEGORY_DEFINITIONS: Record<CategoryKey, CategoryDefinition> = {
-    immigration: {
-        key: 'immigration',
-        title: 'Entrevista na imigração',
-        description: 'Pratique responder perguntas comuns durante a inspeção de imigração ao chegar em um novo país.',
-        roleInstruction: 'Aja como um agente de imigração cordial, porém atento, conduzindo a entrevista inicial com o viajante.',
-        kickoffPrompt: 'Vamos praticar uma entrevista de imigração. Eu serei o agente e você é o viajante chegando agora.',
-        sections: [
-            {
-                type: 'qa',
-                heading: 'Perguntas essenciais',
-                items: [
-                    { question: 'Qual é o motivo da sua viagem?', answer: 'Estou aqui a turismo por duas semanas.' },
-                    { question: 'Onde você ficará hospedado?', answer: 'Ficarei no Hotel Central, no centro da cidade.' },
-                    { question: 'Quanto tempo pretende ficar no país?', answer: 'Permanecerei 14 dias e retorno no dia 20 de julho.' },
-                    { question: 'Você tem passagem de retorno?', answer: 'Sim, meu voo de volta está reservado para 20 de julho.' },
-                    { question: 'Quanto dinheiro você está trazendo?', answer: 'Tenho 1.500 dólares em espécie e cartões de crédito.' },
-                    { question: 'Você já visitou nosso país antes?', answer: 'Esta é a minha primeira visita.' },
-                    { question: 'Você tem familiares ou amigos aqui?', answer: 'Não, estou viajando sozinho.' },
-                    { question: 'Qual é a sua profissão?', answer: 'Sou analista de sistemas no Brasil.' },
-                    { question: 'Você trouxe alimentos ou produtos proibidos?', answer: 'Não, apenas itens pessoais e roupas.' },
-                    { question: 'Qual é o endereço da sua hospedagem?', answer: 'Rua Principal, 123, Hotel Central.' },
-                    { question: 'Você possui seguro viagem?', answer: 'Sim, tenho cobertura internacional pelo plano TravelCare.' },
-                    { question: 'Qual é o seu itinerário durante a estadia?', answer: 'Pretendo visitar museus, parques e os principais pontos turísticos.' },
-                ],
-            },
-        ],
-    },
-    hospital: {
-        key: 'hospital',
-        title: 'Hospital',
-        description: 'Use frases úteis para explicar sintomas, pedir ajuda e responder perguntas em um pronto atendimento.',
-        roleInstruction: 'Comporte-se como um profissional de triagem em um hospital, ajudando o paciente a descrever sintomas e oferecendo orientações.',
-        kickoffPrompt: 'Estamos em um hospital. Eu serei o profissional de triagem e vou ajudá-lo a explicar seus sintomas.',
-        sections: [
-            {
-                type: 'qa',
-                heading: 'Perguntas de triagem',
-                items: [
-                    { question: 'Qual é o problema principal hoje?', answer: 'Estou sentindo dores fortes no estômago desde ontem.' },
-                    { question: 'Quando os sintomas começaram?', answer: 'Começaram há cerca de doze horas.' },
-                    { question: 'Você tem alergia a algum medicamento?', answer: 'Não tenho alergias conhecidas.' },
-                    { question: 'Você está tomando algum remédio agora?', answer: 'Estou tomando apenas um analgésico leve.' },
-                    { question: 'Você tem febre ou calafrios?', answer: 'Sim, tive febre durante a noite.' },
-                    { question: 'Como você avaliaria sua dor de zero a dez?', answer: 'Diria que a dor está em oito.' },
-                    { question: 'Você já passou por alguma cirurgia recente?', answer: 'Não, nunca fiz cirurgia.' },
-                    { question: 'Você tem alguma condição médica crônica?', answer: 'Tenho pressão alta controlada com medicamentos.' },
-                ],
-            },
-            {
-                type: 'phrases',
-                heading: 'Sintomas para mencionar',
-                items: [
-                    'Estou com tontura e visão turva.',
-                    'Tenho dificuldade para respirar.',
-                    'Sinto dormência no braço esquerdo.',
-                    'Estou com náusea e falta de apetite.',
-                    'Tenho tosse seca há vários dias.',
-                    'Meu joelho está inchado e quente.',
-                ],
-            },
-        ],
-    },
-    supermarket: {
-        key: 'supermarket',
-        title: 'Supermercado',
-        description: 'Aprenda como pedir ajuda para encontrar itens comuns no mercado e praticar vocabulário de compras.',
-        roleInstruction: 'Finja ser um atendente prestativo de supermercado, oferecendo opções e recomendações de produtos.',
-        kickoffPrompt: 'Estamos em um supermercado. Vou ajudá-lo a encontrar os itens da sua lista.',
-        sections: [
-            {
-                type: 'phrases',
-                heading: 'Pedidos úteis',
-                items: [
-                    'Você pode me mostrar onde ficam as frutas frescas?',
-                    'Preciso encontrar verduras para fazer uma salada.',
-                    'Onde estão os biscoitos mais populares?',
-                    'Vocês têm refrigerantes sem açúcar?',
-                    'Pode me ajudar a localizar a seção de sardinhas enlatadas?',
-                    'Estou procurando frango fresco para o jantar.',
-                    'Tem alguma promoção em frutas da estação?',
-                    'Qual é a diferença entre essas marcas de biscoito?',
-                    'Pode pesar um quilo de bananas para mim?',
-                    'Vocês têm opções de verduras orgânicas?',
-                    'Qual refrigerante você recomenda para acompanhar um churrasco?',
-                    'Onde posso encontrar temperos para o frango?',
-                ],
-            },
-        ],
-    },
-    restaurant: {
-        key: 'restaurant',
-        title: 'Restaurante',
-        description: 'Simule pedidos no restaurante e pratique como solicitar pratos e esclarecer preferências.',
-        roleInstruction: 'Aja como um garçom atencioso, sugerindo combinações e confirmando pedidos com o cliente.',
-        kickoffPrompt: 'Estamos em um restaurante. Sou o garçom e vou ajudá-lo a escolher o prato ideal.',
-        sections: [
-            {
-                type: 'phrases',
-                heading: 'Pedidos comuns',
-                items: [
-                    'Eu gostaria de pedir batatas fritas crocantes, por favor.',
-                    'Pode trazer um bife acebolado ao ponto médio?',
-                    'Quero uma porção de arroz branco.',
-                    'Você pode adicionar um purê de batata cremoso?',
-                    'Gostaria de um prato de peixe grelhado com limão.',
-                    'Tem alguma sugestão de acompanhamento para o bife?',
-                    'Pode servir as batatas fritas sem sal?',
-                    'O purê contém leite ou creme?',
-                    'Qual peixe está mais fresco hoje?',
-                    'Poderia trocar o arroz por legumes cozidos?',
-                    'Pode trazer molho extra para o frango?',
-                    'Gostaria de uma recomendação de bebida que combine com o peixe.',
-                ],
-            },
-        ],
-    },
-};
-
-const CATEGORY_KEYS: CategoryKey[] = ['immigration', 'hospital', 'supermarket', 'restaurant'];
-
-const BASE_CATEGORY_LANGUAGE_NAME = 'Português (BR)';
+import {
+    CATEGORY_DEFINITIONS,
+    CATEGORY_KEYS,
+    BASE_CATEGORY_LANGUAGE_NAME,
+    type CategoryKey,
+    type CategoryDefinition,
+    type CategorySection,
+    type QASection,
+    type PhraseSection,
+    type TranslatedCategories,
+    type QAItem,
+} from '../data/conversationCategories';
+import { getCategoryTranslations, saveCategoryTranslations } from '../services/db';
 
 const LANGUAGE_FLAG_MAP: Record<LanguageCode, string> = {
     'pt-BR': '🇧🇷',
@@ -238,6 +96,10 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
     const userTranscriptRef = useRef('');
     const modelTranscriptRef = useRef('');
 
+    useEffect(() => {
+        translatedByLangRef.current['pt-BR'] = cloneCategoryDefinitions(CATEGORY_DEFINITIONS);
+    }, []);
+
     const learningLanguageName = useMemo(
         () => SUPPORTED_LANGUAGES.find((l) => l.code === settings.learningLanguage)?.name || settings.learningLanguage,
         [settings.learningLanguage]
@@ -248,79 +110,115 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
         [settings.nativeLanguage]
     );
 
-    const ensureCategoryTranslations = useCallback(async (targetLangCode: LanguageCode, targetLangName: string) => {
-        if (targetLangCode === 'pt-BR') {
-            setTranslatedCategories((prev) => prev);
-            setIsTranslatingCategories(false);
-            return;
-        }
+    const rememberTranslations = useCallback(
+        (language: LanguageCode, categories: TranslatedCategories) => {
+            const cloned = cloneCategoryDefinitions(categories);
+            translatedByLangRef.current[language] = cloned;
+            setTranslatedCategories(cloned);
+        },
+        []
+    );
 
-        if (translatedByLangRef.current[targetLangCode]) {
-            setTranslatedCategories(translatedByLangRef.current[targetLangCode]);
-            setIsTranslatingCategories(false);
-            return;
-        }
-
-        setIsTranslatingCategories(true);
-        const translated: Partial<TranslatedCategories> = {};
-
-        const translateValue = async (text: string) => {
-            if (!text.trim()) return text;
-            const cacheKey = `${targetLangCode}::${text}`;
-            if (translationCacheRef.current[cacheKey]) {
-                return translationCacheRef.current[cacheKey];
+    const ensureCategoryTranslations = useCallback(
+        async (targetLangCode: LanguageCode, targetLangName: string) => {
+            if (targetLangCode === 'pt-BR') {
+                rememberTranslations('pt-BR', CATEGORY_DEFINITIONS);
+                setIsTranslatingCategories(false);
+                return;
             }
+
+            if (translatedByLangRef.current[targetLangCode]) {
+                setTranslatedCategories(translatedByLangRef.current[targetLangCode]);
+                setIsTranslatingCategories(false);
+                return;
+            }
+
             try {
-                const translatedText = await translateText(text, BASE_CATEGORY_LANGUAGE_NAME, targetLangName);
-                const sanitized = translatedText && translatedText !== 'Erro na tradução.' ? translatedText : text;
-                translationCacheRef.current[cacheKey] = sanitized;
-                return sanitized;
+                const stored = await getCategoryTranslations(targetLangCode);
+                if (stored) {
+                    rememberTranslations(targetLangCode, stored);
+                    setIsTranslatingCategories(false);
+                    return;
+                }
             } catch (error) {
-                console.error('Erro ao traduzir texto da categoria:', error);
-                return text;
+                console.error('Erro ao carregar traduções de categorias salvas:', error);
             }
-        };
 
-        for (const key of CATEGORY_KEYS) {
-            const definition = CATEGORY_DEFINITIONS[key];
-            const sections = await Promise.all(
-                definition.sections.map(async (section): Promise<CategorySection> => {
+            setIsTranslatingCategories(true);
+            const translated: Partial<TranslatedCategories> = {};
+
+            const translateValue = async (text: string) => {
+                if (!text.trim()) return text;
+                const cacheKey = `${targetLangCode}::${text}`;
+                if (translationCacheRef.current[cacheKey]) {
+                    return translationCacheRef.current[cacheKey];
+                }
+                try {
+                    const translatedText = await translateText(text, BASE_CATEGORY_LANGUAGE_NAME, targetLangName);
+                    const sanitized = translatedText && translatedText !== 'Erro na tradução.' ? translatedText : text;
+                    translationCacheRef.current[cacheKey] = sanitized;
+                    return sanitized;
+                } catch (error) {
+                    console.error('Erro ao traduzir texto da categoria:', error);
+                    return text;
+                }
+            };
+
+            for (const key of CATEGORY_KEYS) {
+                const definition = CATEGORY_DEFINITIONS[key];
+                const sections: CategorySection[] = [];
+
+                for (const section of definition.sections) {
                     if (section.type === 'qa') {
-                        const translatedItems = await Promise.all(
-                            section.items.map(async (item) => ({
-                                question: await translateValue(item.question),
-                                answer: await translateValue(item.answer),
-                            }))
-                        );
-                        return {
+                        const translatedItems: QAItem[] = [];
+
+                        for (const item of section.items) {
+                            const question = await translateValue(item.question);
+                            const answer = await translateValue(item.answer);
+                            translatedItems.push({ question, answer });
+                        }
+
+                        sections.push({
                             ...section,
                             heading: await translateValue(section.heading),
                             items: translatedItems,
-                        } as QASection;
+                        } as QASection);
+                    } else {
+                        const translatedItems: string[] = [];
+
+                        for (const item of section.items) {
+                            translatedItems.push(await translateValue(item));
+                        }
+
+                        sections.push({
+                            ...section,
+                            heading: await translateValue(section.heading),
+                            items: translatedItems,
+                        } as PhraseSection);
                     }
-                    const translatedItems = await Promise.all(section.items.map(translateValue));
-                    return {
-                        ...section,
-                        heading: await translateValue(section.heading),
-                        items: translatedItems,
-                    } as PhraseSection;
-                })
-            );
+                }
 
-            translated[key] = {
-                ...definition,
-                title: await translateValue(definition.title),
-                description: await translateValue(definition.description),
-                roleInstruction: await translateValue(definition.roleInstruction),
-                kickoffPrompt: await translateValue(definition.kickoffPrompt),
-                sections,
-            };
-        }
+                translated[key] = {
+                    ...definition,
+                    title: await translateValue(definition.title),
+                    description: await translateValue(definition.description),
+                    roleInstruction: await translateValue(definition.roleInstruction),
+                    kickoffPrompt: await translateValue(definition.kickoffPrompt),
+                    sections,
+                };
+            }
 
-        translatedByLangRef.current[targetLangCode] = translated as TranslatedCategories;
-        setTranslatedCategories(translated as TranslatedCategories);
-        setIsTranslatingCategories(false);
-    }, []);
+            const finalTranslations = translated as TranslatedCategories;
+            rememberTranslations(targetLangCode, finalTranslations);
+            try {
+                await saveCategoryTranslations(targetLangCode, finalTranslations);
+            } catch (error) {
+                console.error('Erro ao salvar traduções de categorias:', error);
+            }
+            setIsTranslatingCategories(false);
+        },
+        [rememberTranslations]
+    );
 
     useEffect(() => {
         if (!useTranslatedCategories || !learningLanguageName) {
@@ -408,15 +306,13 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                 const setupPayload = {
                     type: 'setup',
                     payload: {
-                        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-                        config: {
-                            responseModalities: ['AUDIO'],
-                            inputAudioTranscription: {},
-                            outputAudioTranscription: {},
-                            systemInstruction: `Você é um parceiro de conversação bilíngue. O usuário fala ${nativeLang} e você responde em ${learningLang}. Mantenha as respostas curtas e conversacionais.${activeCategoryDefinition ? ` Contexto da simulação: ${activeCategoryDefinition.roleInstruction} Use perguntas e respostas condizentes com este cenário e encoraje o usuário a praticar o vocabulário correspondente.` : ''}`,
-                            speechConfig: {
-                                voiceConfig: { prebuiltVoiceConfig: { voiceName } },
-                            },
+                        model: 'models/gemini-2.0-flash-exp',
+                        responseModalities: ['AUDIO'],
+                        inputAudioTranscription: {},
+                        outputAudioTranscription: {},
+                        systemInstruction: `Você é um parceiro de conversação bilíngue. O usuário fala ${nativeLang} e você responde em ${learningLang}. Mantenha as respostas curtas e conversacionais.${activeCategoryDefinition ? ` Contexto da simulação: ${activeCategoryDefinition.roleInstruction} Use perguntas e respostas condizentes com este cenário e encoraje o usuário a praticar o vocabulário correspondente.` : ''}`,
+                        speechConfig: {
+                            voiceConfig: { prebuiltVoiceConfig: { voiceName } },
                         },
                     },
                 };

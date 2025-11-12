@@ -183,6 +183,52 @@ const App: React.FC = () => {
     db.saveSettings(newSettings);
   };
 
+  const handleExportData = async () => {
+    try {
+      const snapshot = await db.exportDatabaseSnapshot();
+      const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      link.href = url;
+      link.download = `linguaflow-backup-${timestamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      alert('Backup exportado com sucesso!');
+    } catch (error) {
+      console.error('Failed to export data snapshot', error);
+      alert('Falha ao exportar backup. Verifique o console para detalhes.');
+    }
+  };
+
+  const handleImportBackup = async (file: File) => {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as db.DatabaseSnapshot;
+      await db.importDatabaseSnapshot(parsed);
+
+      const [savedSettings, savedFlashcards, savedPhonetics, savedImageOverrides, savedAnkiDecks] = await Promise.all([
+        db.getSettings(),
+        db.getFlashcards(),
+        db.getAllPhonetics(),
+        db.getAllImageOverrides(),
+        db.getAnkiDeckSummaries(),
+      ]);
+
+      setSettings(savedSettings);
+      setUserFlashcards(savedFlashcards);
+      setPhoneticCache(savedPhonetics);
+      setImageOverrides(savedImageOverrides);
+      setAnkiDecks(savedAnkiDecks);
+      alert('Backup restaurado com sucesso!');
+    } catch (error) {
+      console.error('Failed to import backup', error);
+      alert('Falha ao restaurar backup. Verifique se o arquivo é válido.');
+    }
+  };
+
   const addFlashcard = useCallback((newCardData: Omit<Flashcard, 'id'>) => {
     const newCard: Flashcard = { ...newCardData, id: new Date().toISOString(), sourceType: 'manual' };
     db.addFlashcard(newCard).then(() => {
@@ -328,6 +374,8 @@ const App: React.FC = () => {
             ankiDecks={ankiDecks}
             onSettingsChange={handleSettingsChange}
             onRemoveAnkiDeck={handleRemoveAnkiDeck}
+            onExportBackup={handleExportData}
+            onImportBackup={handleImportBackup}
             onBack={() => setView('conversation')}
           />
         );

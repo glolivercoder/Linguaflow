@@ -8,6 +8,8 @@ pushd "%~dp0"
 set "SCRIPT_DIR=%~dp0"
 set "PROXY_DIR=%SCRIPT_DIR%backend\proxy"
 set "PROXY_HEALTH=http://localhost:3100/healthz"
+set "ARGOS_DIR=%SCRIPT_DIR%backend\anki_import"
+set "ARGOS_HEALTH=http://localhost:8100/health"
 
 echo ========================================
 echo   🚀 LINGUAFLOW - Sistema de Ingles
@@ -158,9 +160,58 @@ if %errorlevel% equ 0 (
 echo.
 
 REM ========================================
-REM 3. INICIAR FRONTEND (REACT)
+REM 3. INICIAR SERVIÇO ARGOS (TRADUÇÃO OFFLINE)
 REM ========================================
-echo [3/3] Iniciando Frontend (React)...
+echo [3/4] Iniciando Serviço de Tradução Offline (Argos)...
+echo.
+
+if not exist "%ARGOS_DIR%" (
+    echo ⚠️  AVISO: Diretório backend\anki_import não encontrado.
+    echo     Execute o setup antes de continuar para habilitar a traducao offline.
+    goto AFTER_ARGOS
+)
+
+pushd "%ARGOS_DIR%"
+
+if not exist venv (
+    echo ⚠️  AVISO: Ambiente virtual do Argos nao encontrado!
+    echo     Crie com: python -m venv backend\anki_import\venv e instale as dependencias.
+    popd
+    goto AFTER_ARGOS
+)
+
+echo Verificando ambiente virtual do Argos...
+call venv\Scripts\activate.bat >nul 2>&1
+if %errorlevel% neq 0 (
+    echo ⚠️  Nao foi possivel ativar o venv do Argos.
+    popd
+    goto AFTER_ARGOS
+)
+
+echo Iniciando servidor Argos...
+start "LinguaFlow Argos Service" cmd /k "cd /d %CD% && call venv\Scripts\activate && python -m uvicorn main:app --host 0.0.0.0 --port 8100"
+
+popd
+
+echo Aguardando Argos inicializar (6 segundos)...
+timeout /t 6 /nobreak >nul
+
+echo Verificando saude do Argos...
+curl -s "%ARGOS_HEALTH%" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo ✅ Argos respondendo corretamente!
+) else (
+    echo ⚠️  Argos pode nao estar pronto ainda...
+    echo    Verifique em: %ARGOS_HEALTH%
+)
+echo.
+
+:AFTER_ARGOS
+
+REM ========================================
+REM 4. INICIAR FRONTEND (REACT)
+REM ========================================
+echo [4/4] Iniciando Frontend (React)...
 echo.
 
 REM Verificar se node_modules existe

@@ -1,8 +1,9 @@
 import Dexie, { type Table } from 'dexie';
-import { Settings, Flashcard, AnkiDeckSummary } from '../types';
+import { Settings, Flashcard, AnkiDeckSummary, LanguageCode } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
+import type { TranslatedCategories } from '../data/conversationCategories';
 
-interface PhoneticCache {
+export interface PhoneticCache {
   cardId: string;
   phonetic: string;
 }
@@ -17,6 +18,12 @@ interface SettingsRecord extends Settings {
 }
 
 interface AnkiDeckRecord extends AnkiDeckSummary {}
+
+export interface CategoryTranslationRecord {
+  language: LanguageCode;
+  categories: TranslatedCategories;
+  updatedAt: string;
+}
 
 const db = new Dexie('linguaFlowDB');
 
@@ -57,11 +64,21 @@ db.version(4).stores({
   });
 });
 
+db.version(5).stores({
+  settings: 'id',
+  flashcards: 'id, sourceType, ankiDeckId',
+  phonetics: 'cardId',
+  imageOverrides: 'cardId',
+  ankiDecks: 'id, importedAt',
+  categoryTranslations: 'language',
+});
+
 const settingsTable: Table<SettingsRecord, number> = db.table('settings');
 const flashcardsTable: Table<Flashcard, string> = db.table('flashcards');
 const phoneticsTable: Table<PhoneticCache, string> = db.table('phonetics');
 const imageOverridesTable: Table<ImageOverride, string> = db.table('imageOverrides');
 const ankiDecksTable: Table<AnkiDeckRecord, string> = db.table('ankiDecks');
+const categoryTranslationsTable: Table<CategoryTranslationRecord, LanguageCode> = db.table('categoryTranslations');
 
 
 // --- Settings ---
@@ -168,4 +185,103 @@ export const replaceAnkiDeckSummaries = async (summaries: AnkiDeckSummary[]): Pr
       await ankiDecksTable.bulkAdd(summaries);
     }
   });
+};
+
+// --- Category Translations ---
+export const getCategoryTranslations = async (
+  language: LanguageCode
+): Promise<TranslatedCategories | null> => {
+  const record = await categoryTranslationsTable.get(language);
+  return record?.categories ?? null;
+};
+
+export const saveCategoryTranslations = async (
+  language: LanguageCode,
+  categories: TranslatedCategories
+): Promise<void> => {
+  await categoryTranslationsTable.put({
+    language,
+    categories,
+    updatedAt: new Date().toISOString(),
+  });
+};
+
+export const getAllCategoryTranslationRecords = async (): Promise<CategoryTranslationRecord[]> => {
+  return categoryTranslationsTable.toArray();
+};
+
+export interface DatabaseSnapshot {
+  settings: Settings;
+  flashcards: Flashcard[];
+  phonetics: PhoneticCache[];
+  imageOverrides: ImageOverride[];
+  ankiDecks: AnkiDeckSummary[];
+  categoryTranslations: CategoryTranslationRecord[];
+}
+
+export const exportDatabaseSnapshot = async (): Promise<DatabaseSnapshot> => {
+  const [settings, flashcards, phonetics, imageOverrides, ankiDecks, categoryTranslations] = await Promise.all([
+    getSettings(),
+    getFlashcards(),
+    getAllPhonetics(),
+    getAllImageOverrides(),
+    getAnkiDeckSummaries(),
+    getAllCategoryTranslationRecords(),
+  ]);
+
+  return {
+    settings,
+    flashcards,
+    phonetics,
+    imageOverrides,
+    ankiDecks,
+    categoryTranslations,
+  };
+};
+
+export const importDatabaseSnapshot = async (snapshot: DatabaseSnapshot): Promise<void> => {
+  await db.transaction(
+    'rw',
+    [
+      settingsTable,
+      flashcardsTable,
+      phoneticsTable,
+      imageOverridesTable,
+      ankiDecksTable,
+      categoryTranslationsTable,
+    ],
+    async () => {
+      await Promise.all([
+        settingsTable.clear(),
+        flashcardsTable.clear(),
+        phoneticsTable.clear(),
+        imageOverridesTable.clear(),
+        ankiDecksTable.clear(),
+        categoryTranslationsTable.clear(),
+      ]);
+
+      const sanitizedSettings = snapshot.settings ?? DEFAULT_SETTINGS;
+      await settingsTable.put({ ...DEFAULT_SETTINGS, ...sanitizedSettings, id: 1 });
+
+      if (snapshot.flashcards?.length) {
+        await flashcardsTable.bulkPut(snapshot.flashcards);
+      }
+
+      if (snapshot.phonetics?.length) {
+        await phoneticsTable.bulkPut(snapshot.phonetics);
+      }
+
+      if (snapshot.imageOverrides?.length) {
+        await imageOverridesTable.bulkPut(snapshot.imageOverrides);
+      }
+
+      if (snapshot.ankiDecks?.length) {
+        await ankiDecksTable.bulkPut(snapshot.ankiDecks);
+      }
+
+      if (snapshot.categoryTranslations?.length) {
+        await categoryTranslationsTable.bulkPut(snapshot.categoryTranslations);
+      }
+    }
+  );
 };

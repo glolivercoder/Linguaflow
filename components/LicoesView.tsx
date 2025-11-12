@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Settings } from '../types';
+import { LanguageCode, Settings } from '../types';
 import {
   LessonLevel,
   LessonTheme,
@@ -11,6 +11,9 @@ import {
 } from '../types/licoes';
 import PronunciationTest from './PronunciationTest';
 import { LESSONS, BASE_DICTIONARY_ENTRIES } from '../data/lessonsData';
+import { SUPPORTED_LANGUAGES } from '../constants';
+import { translateTextOffline } from '../services/argosService';
+import { translateText as translateTextOnline } from '../services/geminiService';
 import {
   Search,
   BookOpen,
@@ -122,6 +125,10 @@ const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]
 
 const normalizeText = (value: string): string => value.trim().replace(/\s+/g, ' ').toLowerCase();
 
+const getLanguageName = (code: LanguageCode): string => {
+  return SUPPORTED_LANGUAGES.find(language => language.code === code)?.name ?? code;
+};
+
 const countWords = (value: string): number => {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -193,6 +200,7 @@ const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
   const [writingProgress, setWritingProgress] = useState<Record<string, WritingProgressState>>(() =>
     loadProgressFromStorage(STORAGE_KEY_WRITING, {})
   );
+  const [dynamicTranslations, setDynamicTranslations] = useState<Record<string, string>>({});
 
   const ensureQuizProgress = useCallback((lesson: Lesson) => {
     setQuizProgress(prev => {
@@ -530,8 +538,14 @@ const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
   }, []);
 
   const dictionaryEntries: DictionaryEntryWithMeta[] = useMemo(() => {
-    return Array.from(dictionaryMap.values()).sort((a, b) => a.term.localeCompare(b.term, 'en'));
-  }, [dictionaryMap]);
+    return Array.from(dictionaryMap.values())
+      .map(entry => {
+        const normalized = normalizeTerm(entry.term);
+        const override = dynamicTranslations[normalized];
+        return override ? { ...entry, translation: override } : entry;
+      })
+      .sort((a, b) => a.term.localeCompare(b.term, 'en'));
+  }, [dictionaryMap, dynamicTranslations]);
 
   const filteredLessons = useMemo(() => {
     return LESSONS.filter(lesson => {
@@ -652,33 +666,93 @@ const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
   }, [dictionaryEntries, dictionaryQuery]);
 
   const openDictionaryEntry = useCallback(
-    (rawTerm: string) => {
+    async (rawTerm: string) => {
       const normalized = normalizeTerm(rawTerm);
       if (!normalized) return;
 
       const entry = dictionaryMap.get(normalized);
-      if (entry) {
-        setActiveDictionaryEntry(entry);
-        return;
-      }
-
       const firstExactByWord = dictionaryEntries.find(
         item => normalizeTerm(item.word ?? item.term) === normalized
       );
 
-      if (firstExactByWord) {
-        setActiveDictionaryEntry(firstExactByWord);
+      const baseEntry: DictionaryEntryWithMeta = entry
+        ? entry
+        : firstExactByWord
+          ? firstExactByWord
+          : {
+              term: rawTerm,
+              word: rawTerm,
+              translation: undefined,
+              examples: [],
+            };
+
+      const cachedTranslation = dynamicTranslations[normalized];
+      const initialTranslation = cachedTranslation ?? baseEntry.translation ?? 'Traduzindo...';
+
+      setActiveDictionaryEntry({
+        ...baseEntry,
+        translation: initialTranslation,
+      });
+
+      if (cachedTranslation) {
         return;
       }
 
-      setActiveDictionaryEntry({
-        term: rawTerm,
-        word: rawTerm,
-        translation: 'Tradução não encontrada no dicionário interno.',
-        examples: [],
+      const sourceCode = settings.learningLanguage;
+      const targetCode = settings.nativeLanguage;
+
+      let translatedText: string | null = null;
+
+      try {
+        const offlineTranslation = await translateTextOffline(rawTerm, sourceCode, targetCode);
+        if (offlineTranslation) {
+          translatedText = offlineTranslation;
+        }
+      } catch (offlineError) {
+        console.warn('Argos offline translation failed, falling back to Gemini.', offlineError);
+      }
+
+      if (!translatedText) {
+        try {
+          const onlineTranslation = await translateTextOnline(
+            rawTerm,
+            getLanguageName(sourceCode),
+            getLanguageName(targetCode)
+          );
+          if (onlineTranslation && onlineTranslation !== 'Erro na tradução.') {
+            translatedText = onlineTranslation;
+          }
+        } catch (onlineError) {
+          console.error('Gemini translation fallback failed.', onlineError);
+        }
+      }
+
+      if (!translatedText) {
+        translatedText = 'Não foi possível traduzir no momento.';
+      }
+
+      setDynamicTranslations(prev => {
+        if (prev[normalized] === translatedText) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [normalized]: translatedText!,
+        };
+      });
+
+      setActiveDictionaryEntry(prev => {
+        if (!prev) return prev;
+        if (normalizeTerm(prev.term) !== normalized) {
+          return prev;
+        }
+        return {
+          ...prev,
+          translation: translatedText!,
+        };
       });
     },
-    [dictionaryEntries, dictionaryMap]
+    [dictionaryEntries, dictionaryMap, dynamicTranslations, settings.learningLanguage, settings.nativeLanguage]
   );
 
   const handleDictionarySubmit = useCallback(
@@ -687,7 +761,7 @@ const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
       if (!dictionaryQuery.trim()) {
         return;
       }
-      openDictionaryEntry(dictionaryQuery);
+      void openDictionaryEntry(dictionaryQuery);
     },
     [dictionaryQuery, openDictionaryEntry]
   );

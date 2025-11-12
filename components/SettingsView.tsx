@@ -1,5 +1,5 @@
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Settings, VoiceGender, AnkiDeckSummary, VoiceModelInfo } from '../types';
 import { SUPPORTED_LANGUAGES } from '../constants';
 import { generateReferenceAudio, listVoiceModels } from '../services/pronunciationService';
@@ -9,10 +9,12 @@ interface SettingsViewProps {
   ankiDecks: AnkiDeckSummary[];
   onSettingsChange: (newSettings: Settings) => void;
   onRemoveAnkiDeck: (deckId: string) => void;
+  onExportBackup: () => void;
+  onImportBackup: (file: File) => Promise<void>;
   onBack: () => void;
 }
 
-const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSettingsChange, onRemoveAnkiDeck, onBack }) => {
+const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSettingsChange, onRemoveAnkiDeck, onExportBackup, onImportBackup, onBack }) => {
   
   const [voiceModels, setVoiceModels] = useState<VoiceModelInfo[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -21,6 +23,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
   const [generatedModel, setGeneratedModel] = useState<string | null>(null);
+  const backupFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const loadVoiceModels = async () => {
@@ -86,11 +89,62 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
     });
   };
 
+  const handleBackupImportClick = () => {
+    backupFileInputRef.current?.click();
+  };
+
+  const handleBackupFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      await onImportBackup(file);
+    } catch (error) {
+      console.error('Falha ao importar backup:', error);
+      window.alert('Falha ao importar backup. Verifique se o arquivo é válido.');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
   return (
     <div className="p-4 md:p-6 h-full flex flex-col animate-fade-in">
       <h2 className="text-2xl font-bold mb-6 text-cyan-400">Configurações</h2>
       
       <div className="space-y-6 max-w-2xl">
+        <div className="p-4 bg-gray-800 rounded-lg space-y-3">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-200">Backup e Restauração</h3>
+            <p className="text-xs text-gray-400 mt-1">
+              Salve todas as configurações, flashcards, imagens sobrescritas, traduções e dados do Anki em um único arquivo.
+              Ao exportar, o navegador abrirá a caixa de "Salvar como" para você escolher a pasta.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={onExportBackup}
+              className="flex-1 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-md transition-colors"
+            >
+              Exportar backup
+            </button>
+            <button
+              onClick={handleBackupImportClick}
+              className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-md transition-colors"
+            >
+              Restaurar de arquivo
+            </button>
+          </div>
+          <p className="text-xs text-gray-500">
+            Recomenda-se guardar o arquivo em um diretório seguro e manter cópias de versões anteriores.
+          </p>
+          <input
+            ref={backupFileInputRef}
+            type="file"
+            accept="application/json"
+            className="hidden"
+            onChange={handleBackupFileChange}
+          />
+        </div>
+
         <div>
           <label htmlFor="nativeLanguage" className="block text-sm font-medium text-gray-300 mb-2">
             Minha língua nativa
