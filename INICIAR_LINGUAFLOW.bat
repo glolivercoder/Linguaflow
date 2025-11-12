@@ -2,6 +2,13 @@
 title LinguaFlow - Iniciando Sistema
 color 0A
 
+setlocal EnableExtensions EnableDelayedExpansion
+pushd "%~dp0"
+
+set "SCRIPT_DIR=%~dp0"
+set "PROXY_DIR=%SCRIPT_DIR%backend\proxy"
+set "PROXY_HEALTH=http://localhost:3100/healthz"
+
 echo ========================================
 echo   🚀 LINGUAFLOW - Sistema de Ingles
 echo ========================================
@@ -35,9 +42,54 @@ REM Criar diretorio de logs
 if not exist logs mkdir logs
 
 REM ========================================
-REM 1. INICIAR BACKEND DE PRONUNCIA (VENV)
+REM 1. INICIAR PROXY DE INTEGRACOES (NODE)
 REM ========================================
-echo [1/2] Iniciando Backend de Pronuncia (Python venv + Piper TTS)...
+echo [1/3] Iniciando Proxy de Integracoes (Gemini/Pixabay)...
+echo.
+
+if not exist "%PROXY_DIR%" (
+    echo ⚠️  AVISO: Diretório backend\proxy não encontrado.
+    echo     Configure o proxy antes de continuar para evitar falhas nas integrações Gemini/Pixabay.
+    goto AFTER_PROXY
+)
+
+pushd "%PROXY_DIR%"
+
+if not exist node_modules (
+    echo Instalando dependencias do proxy...
+    call npm install
+    if %errorlevel% neq 0 (
+        echo ❌ Falha ao instalar dependencias do proxy
+        pause
+        popd
+        goto CLEANUP_AND_EXIT
+    )
+)
+
+echo Iniciando servidor proxy...
+start "LinguaFlow Proxy" cmd /k "pushd ""%PROXY_DIR%"" && npm run dev"
+
+popd
+
+echo Aguardando proxy inicializar (5 segundos)...
+timeout /t 5 /nobreak >nul
+
+echo Verificando saude do proxy...
+curl -s "%PROXY_HEALTH%" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo ✅ Proxy respondendo corretamente!
+) else (
+    echo ⚠️  Proxy pode nao estar pronto ainda...
+    echo    Verifique manualmente em: %PROXY_HEALTH%
+)
+echo.
+
+:AFTER_PROXY
+
+REM ========================================
+REM 2. INICIAR BACKEND DE PRONUNCIA (VENV)
+REM ========================================
+echo [2/3] Iniciando Backend de Pronuncia (Python venv + Piper TTS)...
 echo.
 
 cd backend\pronunciation
@@ -48,7 +100,7 @@ if not exist venv (
     echo Execute primeiro: backend\pronunciation\setup_piper_venv.bat
     pause
     cd ..\..
-    exit /b 1
+    goto CLEANUP_AND_EXIT
 )
 
 REM Garantir diretorios persistentes
@@ -66,7 +118,7 @@ if %errorlevel% neq 0 (
     echo Execute: backend\pronunciation\setup_piper_venv.bat
     pause
     cd ..\..
-    exit /b 1
+    goto CLEANUP_AND_EXIT
 )
 
 echo ✅ Piper TTS encontrado no venv
@@ -84,9 +136,9 @@ if %MODEL_FOUND%==0 (
     echo.
 )
 
-REM Iniciar servidor FastAPI em nova janela
+REM Iniciar servidor FastAPI em nova janela utilizando uvicorn diretamente
 echo Iniciando servidor FastAPI...
-start "LinguaFlow Pronunciation API" cmd /k "cd /d %CD% && venv\Scripts\activate && python main.py"
+start "LinguaFlow Pronunciation API" cmd /k "cd /d %CD% && call venv\Scripts\activate && python -m uvicorn main:app --host 0.0.0.0 --port 8000"
 
 cd ..\..
 
@@ -106,9 +158,9 @@ if %errorlevel% equ 0 (
 echo.
 
 REM ========================================
-REM 2. INICIAR FRONTEND (REACT)
+REM 3. INICIAR FRONTEND (REACT)
 REM ========================================
-echo [2/2] Iniciando Frontend (React)...
+echo [3/3] Iniciando Frontend (React)...
 echo.
 
 REM Verificar se node_modules existe
@@ -119,7 +171,7 @@ if not exist node_modules (
     if %errorlevel% neq 0 (
         echo ❌ Falha ao instalar dependencias
         pause
-        exit /b 1
+        goto CLEANUP_AND_EXIT
     )
 )
 
@@ -170,4 +222,9 @@ echo    - Documentacao: backend\pronunciation\INICIO_RAPIDO.md
 echo.
 echo Pressione qualquer tecla para sair deste terminal...
 echo (Os servidores continuarao rodando nas outras janelas)
+goto CLEANUP_AND_EXIT
+
+:CLEANUP_AND_EXIT
+popd
+endlocal
 pause >nul

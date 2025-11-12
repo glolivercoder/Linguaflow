@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
         port: 3001,
         host: '0.0.0.0',
         headers: {
-          'Content-Security-Policy': "default-src 'self' blob: http://localhost:* http://127.0.0.1:*; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.tailwindcss.com https://aistudiocdn.com https://unpkg.com; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* http://127.0.0.1:* ws: wss:; img-src * data: blob:; media-src 'self' blob: data: http://localhost:* http://127.0.0.1:*; font-src 'self' data:"
+          'Content-Security-Policy': "default-src 'self' blob: http://localhost:* http://127.0.0.1:*; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.tailwindcss.com https://aistudiocdn.com https://unpkg.com; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* http://127.0.0.1:* http://localhost:3100 ws://localhost:3100 ws: wss: https://pixabay.com https://xgozq2lbwxa4loze4irwn52pse0wgbxm.lambda-url.us-east-1.on.aws; img-src * data: blob:; media-src 'self' blob: data: http://localhost:* http://127.0.0.1:*; font-src 'self' data:"
         }
       },
       plugins: [react()],

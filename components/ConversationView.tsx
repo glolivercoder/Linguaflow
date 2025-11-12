@@ -2,13 +2,13 @@
 
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { GoogleGenAI, LiveServerMessage, Modality, Blob as GenaiBlob } from "@google/genai";
 // FIX: Import the 'decode' function to handle audio data from the server.
 import { encode, decodeAudioData, decode } from '../services/geminiService';
 import { Settings, Flashcard, LanguageCode } from '../types';
 import { SUPPORTED_LANGUAGES, VOICE_CONFIG } from '../constants';
 import * as Icons from './icons';
 import { getPhonetics, translateText, getPronunciationCorrection, getGroundedAnswer } from '../services/geminiService';
+import { PROXY_WS_URL } from '../services/proxyClient';
 
 type CategoryKey = 'immigration' | 'hospital' | 'supermarket' | 'restaurant';
 
@@ -204,11 +204,6 @@ const cloneCategoryDefinitions = (source: Record<CategoryKey, CategoryDefinition
     return clone as TranslatedCategories;
 };
 
-const API_KEY = process.env.API_KEY;
-if (!API_KEY) throw new Error("API_KEY not set");
-
-const ai = new GoogleGenAI({ apiKey: API_KEY });
-
 interface ConversationViewProps {
   settings: Settings;
   addFlashcard: (card: Omit<Flashcard, 'id'>) => void;
@@ -223,11 +218,11 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
     const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
     const [selectedCategoryKey, setSelectedCategoryKey] = useState<CategoryKey | null>(null);
     const [categoryPanelVisible, setCategoryPanelVisible] = useState(false);
-    const [useTranslatedCategories, setUseTranslatedCategories] = useState(false);
+    const [useTranslatedCategories, setUseTranslatedCategories] = useState(() => settings.learningLanguage !== 'pt-BR');
     const [translatedCategories, setTranslatedCategories] = useState<TranslatedCategories>(() => cloneCategoryDefinitions(CATEGORY_DEFINITIONS));
     const [isTranslatingCategories, setIsTranslatingCategories] = useState(false);
 
-    const sessionPromiseRef = useRef<Promise<any> | null>(null);
+    const socketRef = useRef<WebSocket | null>(null);
     // FIX: Initialize useRef with null to prevent TypeScript errors.
     const inputAudioContextRef = useRef<AudioContext | null>(null);
     // FIX: Initialize useRef with null to prevent TypeScript errors.
@@ -240,6 +235,8 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
     const audioSourcesRef = useRef(new Set<AudioBufferSourceNode>());
     const translationCacheRef = useRef<Record<string, string>>({});
     const translatedByLangRef = useRef<Record<LanguageCode, TranslatedCategories>>({});
+    const userTranscriptRef = useRef('');
+    const modelTranscriptRef = useRef('');
 
     const learningLanguageName = useMemo(
         () => SUPPORTED_LANGUAGES.find((l) => l.code === settings.learningLanguage)?.name || settings.learningLanguage,
@@ -341,11 +338,9 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
     const activeTranslatedCategory = selectedCategoryKey ? translatedCategories[selectedCategoryKey] : null;
 
     const stopConversation = useCallback(() => {
-        if (sessionPromiseRef.current) {
-            sessionPromiseRef.current.then(s => s.close()).catch(e => console.error("Failed to close session gracefully", e));
-            sessionPromiseRef.current = null;
-        }
-        
+        socketRef.current?.close();
+        socketRef.current = null;
+
         mediaStreamRef.current?.getTracks().forEach(track => track.stop());
         mediaStreamRef.current = null;
 
@@ -373,6 +368,8 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
         
         setIsSessionActive(false);
         setStatus('Pronto para começar');
+        userTranscriptRef.current = '';
+        modelTranscriptRef.current = '';
     }, []);
 
     const startConversation = useCallback(async () => {
@@ -396,90 +393,134 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
             const learningLang = learningLanguageName;
 
             // Safely access voice configuration to prevent crashes from invalid settings
-            const voiceLanguageConfig = VOICE_CONFIG[settings.learningLanguage];
-            const voiceName = (voiceLanguageConfig && voiceLanguageConfig[settings.voiceGender]) || 'Kore';
+            const voiceLanguageConfig = VOICE_CONFIG[settings.learningLanguage] || VOICE_CONFIG['en-US'];
+            const voiceName = voiceLanguageConfig[settings.voiceGender] || voiceLanguageConfig.female || 'Kore';
 
 
-            sessionPromiseRef.current = ai.live.connect({
-                model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-                config: {
-                    responseModalities: [Modality.AUDIO],
-                    inputAudioTranscription: {},
-                    outputAudioTranscription: {},
-                    systemInstruction: `Você é um parceiro de conversação bilíngue. O usuário fala ${nativeLang} e você responde em ${learningLang}. Mantenha as respostas curtas e conversacionais.${activeCategoryDefinition ? ` Contexto da simulação: ${activeCategoryDefinition.roleInstruction} Use perguntas e respostas condizentes com este cenário e encoraje o usuário a praticar o vocabulário correspondente.` : ''}`,
-                    speechConfig: {
-                        voiceConfig: { prebuiltVoiceConfig: { voiceName } },
-                    },
-                },
-                callbacks: {
-                    onopen: () => {
-                        if (!inputAudioContextRef.current || !mediaStreamRef.current) return;
-                        const source = inputAudioContextRef.current.createMediaStreamSource(mediaStreamRef.current);
-                        scriptProcessorRef.current = inputAudioContextRef.current.createScriptProcessor(4096, 1, 1);
-                        scriptProcessorRef.current.onaudioprocess = (event) => {
-                            const inputData = event.inputBuffer.getChannelData(0);
-                            const pcmBlob: GenaiBlob = {
-                                data: encode(new Uint8Array(new Int16Array(inputData.map(v => v * 32768)).buffer)),
-                                mimeType: 'audio/pcm;rate=16000',
-                            };
-                            sessionPromiseRef.current?.then((session) => session.sendRealtimeInput({ media: pcmBlob }));
-                        };
-                        source.connect(scriptProcessorRef.current);
-                        scriptProcessorRef.current.connect(inputAudioContextRef.current.destination);
-                        setIsSessionActive(true);
-                        setStatus(activeTranslatedCategory ? `Cenário "${activeTranslatedCategory.title}" ativo. Pode falar!` : 'Conectado. Pode falar!');
-                        if (activeCategoryDefinition) {
-                            sessionPromiseRef.current?.then((session) => {
-                                session.sendRealtimeInput({ text: activeCategoryDefinition.kickoffPrompt });
-                            }).catch((error) => console.error('Failed to send kickoff prompt:', error));
-                        }
-                    },
-                    onmessage: async (message: LiveServerMessage) => {
-                        if (message.serverContent?.inputTranscription) {
-                            setUserTranscript(prev => prev + message.serverContent!.inputTranscription.text);
-                        }
-                        if (message.serverContent?.outputTranscription) {
-                            setModelTranscript(prev => prev + message.serverContent!.outputTranscription.text);
-                        }
-                        if (message.serverContent?.turnComplete) {
-                            setLastTurn({ user: userTranscript, model: modelTranscript });
-                            setUserTranscript('');
-                            setModelTranscript('');
-                        }
-                        const audioData = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-                        if (audioData && outputAudioContextRef.current) {
-                            const outputAudioContext = outputAudioContextRef.current;
-                            nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputAudioContext.currentTime);
-                            const audioBuffer = await decodeAudioData(decode(audioData), outputAudioContext, 24000, 1);
-                            const source = outputAudioContext.createBufferSource();
-                            source.buffer = audioBuffer;
-                            source.connect(outputAudioContext.destination);
-                            source.start(nextStartTimeRef.current);
-                            nextStartTimeRef.current += audioBuffer.duration;
-                            audioSourcesRef.current.add(source);
-                            source.onended = () => audioSourcesRef.current.delete(source);
-                        }
-                        if (message.serverContent?.interrupted) {
-                            audioSourcesRef.current.forEach(s => s.stop());
-                            audioSourcesRef.current.clear();
-                            nextStartTimeRef.current = 0;
-                        }
-                    },
-                    onerror: (e: ErrorEvent) => {
-                        console.error('Session error:', e);
-                        setStatus(`Erro: ${e.message}. Tente novamente.`);
-                        stopConversation();
-                    },
-                    onclose: () => {
-                        stopConversation();
-                    }
+            const ws = new WebSocket(PROXY_WS_URL);
+            socketRef.current = ws;
+
+            ws.onopen = () => {
+                if (!inputAudioContextRef.current || !mediaStreamRef.current) {
+                    return;
                 }
-            });
+
+                const setupPayload = {
+                    type: 'setup',
+                    payload: {
+                        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+                        config: {
+                            responseModalities: ['AUDIO'],
+                            inputAudioTranscription: {},
+                            outputAudioTranscription: {},
+                            systemInstruction: `Você é um parceiro de conversação bilíngue. O usuário fala ${nativeLang} e você responde em ${learningLang}. Mantenha as respostas curtas e conversacionais.${activeCategoryDefinition ? ` Contexto da simulação: ${activeCategoryDefinition.roleInstruction} Use perguntas e respostas condizentes com este cenário e encoraje o usuário a praticar o vocabulário correspondente.` : ''}`,
+                            speechConfig: {
+                                voiceConfig: { prebuiltVoiceConfig: { voiceName } },
+                            },
+                        },
+                    },
+                };
+                ws.send(JSON.stringify(setupPayload));
+
+                const source = inputAudioContextRef.current.createMediaStreamSource(mediaStreamRef.current);
+                scriptProcessorRef.current = inputAudioContextRef.current.createScriptProcessor(4096, 1, 1);
+                scriptProcessorRef.current.onaudioprocess = (event) => {
+                    const inputData = event.inputBuffer.getChannelData(0);
+                    const audioBuffer = new Int16Array(inputData.map((v) => v * 32768));
+                    ws.send(
+                        JSON.stringify({
+                            type: 'audio',
+                            data: encode(new Uint8Array(audioBuffer.buffer)),
+                        }),
+                    );
+                };
+                source.connect(scriptProcessorRef.current);
+                scriptProcessorRef.current.connect(inputAudioContextRef.current.destination);
+
+                setIsSessionActive(true);
+                setStatus(activeTranslatedCategory ? `Cenário "${activeTranslatedCategory.title}" ativo. Pode falar!` : 'Conectado. Pode falar!');
+
+                if (activeCategoryDefinition) {
+                    ws.send(
+                        JSON.stringify({
+                            type: 'client-content',
+                            text: activeCategoryDefinition.kickoffPrompt,
+                        }),
+                    );
+                }
+            };
+
+            ws.onmessage = async (event) => {
+                try {
+                    const message = JSON.parse(event.data as string);
+
+                    if (message?.serverContent?.inputTranscription?.text) {
+                        const text = message.serverContent.inputTranscription.text;
+                        setUserTranscript((prev) => {
+                            const next = prev + text;
+                            userTranscriptRef.current = next;
+                            return next;
+                        });
+                    }
+
+                    if (message?.serverContent?.outputTranscription?.text) {
+                        const text = message.serverContent.outputTranscription.text;
+                        setModelTranscript((prev) => {
+                            const next = prev + text;
+                            modelTranscriptRef.current = next;
+                            return next;
+                        });
+                    }
+
+                    if (message?.serverContent?.turnComplete) {
+                        setLastTurn({
+                            user: userTranscriptRef.current,
+                            model: modelTranscriptRef.current,
+                        });
+                        setUserTranscript('');
+                        setModelTranscript('');
+                        userTranscriptRef.current = '';
+                        modelTranscriptRef.current = '';
+                    }
+
+                    const audioData = message?.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+                    if (audioData && outputAudioContextRef.current) {
+                        const outputAudioContext = outputAudioContextRef.current;
+                        nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputAudioContext.currentTime);
+                        const buffer = await decodeAudioData(decode(audioData), outputAudioContext, 24000, 1);
+                        const source = outputAudioContext.createBufferSource();
+                        source.buffer = buffer;
+                        source.connect(outputAudioContext.destination);
+                        source.start(nextStartTimeRef.current);
+                        nextStartTimeRef.current += buffer.duration;
+                        audioSourcesRef.current.add(source);
+                        source.onended = () => audioSourcesRef.current.delete(source);
+                    }
+
+                    if (message?.serverContent?.interrupted) {
+                        audioSourcesRef.current.forEach((source) => source.stop());
+                        audioSourcesRef.current.clear();
+                        nextStartTimeRef.current = 0;
+                    }
+                } catch (error) {
+                    console.error('Erro ao processar mensagem do proxy Gemini:', error);
+                }
+            };
+
+            ws.onerror = (event) => {
+                console.error('Erro no WebSocket de conversação:', event);
+                setStatus('Erro na sessão de conversa. Tente novamente.');
+                stopConversation();
+            };
+
+            ws.onclose = () => {
+                stopConversation();
+            };
         } catch (error) {
             console.error('Failed to start conversation:', error);
             setStatus('Falha ao iniciar. Verifique as permissões.');
         }
-    }, [activeCategoryDefinition, activeTranslatedCategory, isSessionActive, learningLanguageName, modelTranscript, nativeLangName, settings, stopConversation, userTranscript]);
+    }, [activeCategoryDefinition, activeTranslatedCategory, isSessionActive, learningLanguageName, nativeLangName, settings, stopConversation]);
 
     useEffect(() => {
         return () => { stopConversation(); };
@@ -512,12 +553,9 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
         const translated = translatedCategories[categoryKey];
         setStatus(`Categoria "${translated?.title || CATEGORY_DEFINITIONS[categoryKey].title}" selecionada. Inicie ou continue a conversa dentro desse cenário.`);
 
-        if (sessionPromiseRef.current) {
-            sessionPromiseRef.current
-                .then((session) => {
-                    session.sendRealtimeInput({ text: translated?.kickoffPrompt || CATEGORY_DEFINITIONS[categoryKey].kickoffPrompt });
-                })
-                .catch((error) => console.error('Failed to enviar contexto da categoria:', error));
+        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+            const message = translated?.kickoffPrompt || CATEGORY_DEFINITIONS[categoryKey].kickoffPrompt;
+            socketRef.current.send(JSON.stringify({ type: 'client-content', text: message }));
         }
     }, [translatedCategories]);
 

@@ -209,12 +209,19 @@ async def generate_reference(text: str = Form(...), voice_model: str | None = Fo
         relative_path = os.path.relpath(audio_path, reference_generator.references_dir.parent)
         audio_url = f"/references/{Path(audio_path).name}"
 
+        # Ensure voice model path is JSON serializable (string)
+        voice_model_value = (
+            str(resolved_model_path)
+            if resolved_model_path
+            else str(reference_generator.voice_model_path)
+        )
+
         return JSONResponse(content={
             "status": "success",
             "audio_path": relative_path.replace(os.path.sep, '/'),
             "audio_url": audio_url,
             "text": text,
-            "voice_model": resolved_model_path or reference_generator.voice_model_path,
+            "voice_model": voice_model_value,
         })
 
     except Exception as e:

@@ -42,6 +42,21 @@ db.version(3).stores({
   });
 });
 
+db.version(4).stores({
+  settings: 'id',
+  flashcards: 'id, sourceType, ankiDeckId',
+  phonetics: 'cardId',
+  imageOverrides: 'cardId',
+  ankiDecks: 'id, importedAt',
+}).upgrade(async tx => {
+  const ankiDecksTable = tx.table('ankiDecks');
+  await ankiDecksTable.toCollection().modify((deck: any) => {
+    if (!deck.importedAt) {
+      deck.importedAt = new Date().toISOString();
+    }
+  });
+});
+
 const settingsTable: Table<SettingsRecord, number> = db.table('settings');
 const flashcardsTable: Table<Flashcard, string> = db.table('flashcards');
 const phoneticsTable: Table<PhoneticCache, string> = db.table('phonetics');
