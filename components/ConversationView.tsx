@@ -4,6 +4,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 // FIX: Import the 'decode' function to handle audio data from the server.
 import { encode, decodeAudioData, decode } from '../services/geminiService';
+import { chatWithAudio, encodeInt16ToWavBase64, mergeInt16Chunks } from '../services/voskService';
 import { Settings, Flashcard, LanguageCode } from '../types';
 import { SUPPORTED_LANGUAGES, VOICE_CONFIG } from '../constants';
 import * as Icons from './icons';
@@ -23,6 +24,28 @@ import {
 } from '../data/conversationCategories';
 import { getCategoryTranslations, saveCategoryTranslations } from '../services/db';
 
+const float32ToInt16 = (input: Float32Array): Int16Array => {
+    const output = new Int16Array(input.length);
+    for (let i = 0; i < input.length; i += 1) {
+        const value = Math.max(-1, Math.min(1, input[i] || 0));
+        output[i] = value < 0 ? value * 32768 : value * 32767;
+    }
+    return output;
+};
+
+const isAudioSilent = (samples: Int16Array, threshold = 0.002): boolean => {
+    if (samples.length === 0) {
+        return true;
+    }
+    let sumSquares = 0;
+    for (let i = 0; i < samples.length; i += 1) {
+        const normalized = samples[i] / 32768;
+        sumSquares += normalized * normalized;
+    }
+    const rms = Math.sqrt(sumSquares / samples.length);
+    return rms < threshold;
+};
+
 const LANGUAGE_FLAG_MAP: Record<LanguageCode, string> = {
     'pt-BR': '🇧🇷',
     'en-US': '🇺🇸',
@@ -39,6 +62,12 @@ const getFlagEmoji = (code: LanguageCode): string => LANGUAGE_FLAG_MAP[code] ?? 
 
 const getLanguageDisplayName = (code: LanguageCode): string =>
     SUPPORTED_LANGUAGES.find((l) => l.code === code)?.name || code;
+
+const VOSK_LANGUAGE_OPTIONS: { value: string; label: string }[] = [
+    { value: 'pt-BR', label: 'Português (Brasil)' },
+    { value: 'en-US', label: 'English (US)' },
+    { value: 'en-US-graph', label: 'English (US) – Graph' },
+];
 
 const cloneCategoryDefinitions = (source: Record<CategoryKey, CategoryDefinition>): TranslatedCategories => {
     const clone: Partial<TranslatedCategories> = {};
@@ -79,6 +108,8 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
     const [useTranslatedCategories, setUseTranslatedCategories] = useState(() => settings.learningLanguage !== 'pt-BR');
     const [translatedCategories, setTranslatedCategories] = useState<TranslatedCategories>(() => cloneCategoryDefinitions(CATEGORY_DEFINITIONS));
     const [isTranslatingCategories, setIsTranslatingCategories] = useState(false);
+    const [sessionMode, setSessionMode] = useState<'gemini' | 'vosk' | null>(null);
+    const [voskLanguage, setVoskLanguage] = useState<string>('pt-BR');
 
     const socketRef = useRef<WebSocket | null>(null);
     // FIX: Initialize useRef with null to prevent TypeScript errors.
@@ -95,6 +126,10 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
     const translatedByLangRef = useRef<Record<LanguageCode, TranslatedCategories>>({});
     const userTranscriptRef = useRef('');
     const modelTranscriptRef = useRef('');
+    const audioChunksRef = useRef<Int16Array[]>([]);
+    const sessionModeRef = useRef<'gemini' | 'vosk' | null>(null);
+
+    const [isProcessingVosk, setIsProcessingVosk] = useState(false);
 
     useEffect(() => {
         translatedByLangRef.current['pt-BR'] = cloneCategoryDefinitions(CATEGORY_DEFINITIONS);
@@ -108,6 +143,11 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
     const nativeLangName = useMemo(
         () => SUPPORTED_LANGUAGES.find((l) => l.code === settings.nativeLanguage)?.name || settings.nativeLanguage,
         [settings.nativeLanguage]
+    );
+
+    const selectedVoskLanguageOption = useMemo(
+        () => VOSK_LANGUAGE_OPTIONS.find((option) => option.value === voskLanguage),
+        [voskLanguage]
     );
 
     const rememberTranslations = useCallback(
@@ -235,7 +275,81 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
     const activeCategoryDefinition = selectedCategoryKey ? CATEGORY_DEFINITIONS[selectedCategoryKey] : null;
     const activeTranslatedCategory = selectedCategoryKey ? translatedCategories[selectedCategoryKey] : null;
 
+    const buildSystemPrompt = useCallback(() => {
+        const baseInstruction = `Você é um parceiro de conversação bilíngue. O usuário fala ${nativeLangName} e você responde em ${learningLanguageName}. Mantenha as respostas curtas e conversacionais.`;
+        const scenario = activeCategoryDefinition
+            ? ` Contexto da simulação: ${activeCategoryDefinition.roleInstruction} Use perguntas e respostas condizentes com este cenário e encoraje o usuário a praticar o vocabulário correspondente.`
+            : '';
+        return `${baseInstruction}${scenario}`;
+    }, [activeCategoryDefinition, learningLanguageName, nativeLangName]);
+
+    const processVoskConversation = useCallback(
+        async (chunks: Int16Array[]) => {
+            if (chunks.length === 0) {
+                setStatus('Nenhum áudio capturado para processar.');
+                return;
+            }
+
+            setIsProcessingVosk(true);
+            const languageLabel = selectedVoskLanguageOption?.label ?? voskLanguage;
+            setStatus(`Processando áudio offline (${languageLabel}) com Vosk/OpenRouter...`);
+
+            try {
+                const merged = mergeInt16Chunks(chunks);
+                if (merged.length === 0) {
+                    setStatus('Áudio muito curto. Gravação descartada.');
+                    return;
+                }
+
+                if (isAudioSilent(merged)) {
+                    console.warn('[ConversationView] Áudio capturado está silencioso. Abortando envio ao Vosk.');
+                    setStatus('Não foi possível detectar sua voz. Fale mais alto e tente novamente.');
+                    return;
+                }
+
+                const audioBase64 = encodeInt16ToWavBase64(merged, inputAudioContextRef.current?.sampleRate ?? 16000);
+                const modelId = settings.openRouterModelId?.trim() || 'openrouter/auto';
+                
+                const response = await chatWithAudio({
+                    model: modelId,
+                    audioBase64,
+                    systemPrompt: buildSystemPrompt(),
+                    language: voskLanguage,
+                });
+
+                setUserTranscript(response.transcription);
+                setModelTranscript(response.llm_response || '');
+                userTranscriptRef.current = response.transcription;
+                modelTranscriptRef.current = response.llm_response || '';
+                setLastTurn({ 
+                    user: response.transcription, 
+                    model: response.llm_response || '' 
+                });
+
+                if (response.audio_base64) {
+                    const audioUrl = `data:audio/wav;base64,${response.audio_base64}`;
+                    const audio = new Audio(audioUrl);
+                    audio.play().catch((error) => {
+                        console.error('Erro ao reproduzir áudio da IA:', error);
+                    });
+                }
+
+                setStatus('Interação concluída com Vosk/OpenRouter.');
+            } catch (error) {
+                console.error('Erro ao processar interação Vosk/OpenRouter:', error);
+                setStatus('Erro ao processar áudio offline. Verifique os logs do serviço Vosk.');
+            } finally {
+                setIsProcessingVosk(false);
+            }
+        },
+        [buildSystemPrompt, settings.openRouterModelId, selectedVoskLanguageOption, voskLanguage]
+    );
+
     const stopConversation = useCallback(() => {
+        const currentMode = sessionModeRef.current;
+        const capturedChunks = currentMode === 'vosk' ? [...audioChunksRef.current] : [];
+        audioChunksRef.current = [];
+
         socketRef.current?.close();
         socketRef.current = null;
 
@@ -265,13 +379,29 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
         audioSourcesRef.current.clear();
         
         setIsSessionActive(false);
-        setStatus('Pronto para começar');
         userTranscriptRef.current = '';
         modelTranscriptRef.current = '';
-    }, []);
+
+        sessionModeRef.current = null;
+        setSessionMode(null);
+
+        if (currentMode === 'vosk') {
+            setStatus('Enviando áudio capturado para processamento offline...');
+            void processVoskConversation(capturedChunks);
+        } else {
+            setStatus('Pronto para começar');
+        }
+    }, [processVoskConversation]);
 
     const startConversation = useCallback(async () => {
-        setStatus('Iniciando...');
+        const shouldUseVosk = Boolean(settings.useVoskStt);
+
+        if (isProcessingVosk) {
+            setStatus('Aguarde o processamento offline terminar antes de iniciar uma nova conversa.');
+            return;
+        }
+
+        setStatus(shouldUseVosk ? 'Preparando captura offline...' : 'Iniciando...');
         if (isSessionActive) {
             stopConversation();
         }
@@ -283,17 +413,54 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
 
         try {
             inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-            outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-            
+            outputAudioContextRef.current = shouldUseVosk
+                ? null
+                : new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+
             mediaStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-            
+
+            audioChunksRef.current = [];
+            userTranscriptRef.current = '';
+            modelTranscriptRef.current = '';
+            setUserTranscript('');
+            setModelTranscript('');
+            setLastTurn(null);
+
+            if (shouldUseVosk) {
+                sessionModeRef.current = 'vosk';
+                setSessionMode('vosk');
+
+                const source = inputAudioContextRef.current.createMediaStreamSource(mediaStreamRef.current);
+                const processor = inputAudioContextRef.current.createScriptProcessor(4096, 1, 1);
+                scriptProcessorRef.current = processor;
+                processor.onaudioprocess = (event) => {
+                    const inputData = event.inputBuffer.getChannelData(0);
+                    if (inputData && inputData.length) {
+                        audioChunksRef.current.push(float32ToInt16(inputData));
+                    }
+                };
+                source.connect(processor);
+                processor.connect(inputAudioContextRef.current.destination);
+
+                setIsSessionActive(true);
+                const scenarioTitle = activeTranslatedCategory?.title || activeCategoryDefinition?.title;
+                const languageLabel = selectedVoskLanguageOption?.label ?? voskLanguage;
+                setStatus(
+                    scenarioTitle
+                        ? `Gravando áudio offline (${languageLabel}) no cenário "${scenarioTitle}". Pressione parar para enviar ao Vosk/OpenRouter.`
+                        : `Gravando áudio offline (${languageLabel}). Pressione parar para enviar ao Vosk/OpenRouter.`
+                );
+                return;
+            }
+
+            sessionModeRef.current = 'gemini';
+            setSessionMode('gemini');
+
             const nativeLang = nativeLangName;
             const learningLang = learningLanguageName;
 
-            // Safely access voice configuration to prevent crashes from invalid settings
             const voiceLanguageConfig = VOICE_CONFIG[settings.learningLanguage] || VOICE_CONFIG['en-US'];
             const voiceName = voiceLanguageConfig[settings.voiceGender] || voiceLanguageConfig.female || 'Kore';
-
 
             const ws = new WebSocket(PROXY_WS_URL);
             socketRef.current = ws;
@@ -310,7 +477,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                         responseModalities: ['AUDIO'],
                         inputAudioTranscription: {},
                         outputAudioTranscription: {},
-                        systemInstruction: `Você é um parceiro de conversação bilíngue. O usuário fala ${nativeLang} e você responde em ${learningLang}. Mantenha as respostas curtas e conversacionais.${activeCategoryDefinition ? ` Contexto da simulação: ${activeCategoryDefinition.roleInstruction} Use perguntas e respostas condizentes com este cenário e encoraje o usuário a praticar o vocabulário correspondente.` : ''}`,
+                        systemInstruction: buildSystemPrompt(),
                         speechConfig: {
                             voiceConfig: { prebuiltVoiceConfig: { voiceName } },
                         },
@@ -415,8 +582,46 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
         } catch (error) {
             console.error('Failed to start conversation:', error);
             setStatus('Falha ao iniciar. Verifique as permissões.');
+
+            mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+            mediaStreamRef.current = null;
+
+            if (scriptProcessorRef.current) {
+                try {
+                    scriptProcessorRef.current.disconnect();
+                } catch (e) {
+                    // ignore
+                }
+            }
+            scriptProcessorRef.current = null;
+
+            if (inputAudioContextRef.current && inputAudioContextRef.current.state !== 'closed') {
+                inputAudioContextRef.current.close();
+            }
+            inputAudioContextRef.current = null;
+
+            if (outputAudioContextRef.current && outputAudioContextRef.current.state !== 'closed') {
+                outputAudioContextRef.current.close();
+            }
+            outputAudioContextRef.current = null;
+
+            setIsSessionActive(false);
+            sessionModeRef.current = null;
+            setSessionMode(null);
         }
-    }, [activeCategoryDefinition, activeTranslatedCategory, isSessionActive, learningLanguageName, nativeLangName, settings, stopConversation]);
+    }, [
+        activeCategoryDefinition,
+        activeTranslatedCategory,
+        buildSystemPrompt,
+        isProcessingVosk,
+        isSessionActive,
+        learningLanguageName,
+        nativeLangName,
+        settings.learningLanguage,
+        settings.useVoskStt,
+        settings.voiceGender,
+        stopConversation,
+    ]);
 
     useEffect(() => {
         return () => { stopConversation(); };
@@ -528,7 +733,49 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
 
                 <div className="flex flex-col gap-4 flex-1">
                     <div className="w-full max-w-2xl mx-auto lg:mx-0 bg-gray-800 p-6 rounded-lg shadow-lg">
-                        <p className="text-center text-cyan-400 mb-4">{status}</p>
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+                            <p className="text-center sm:text-left text-cyan-400 flex-1">{status}</p>
+                            <div className="flex items-center justify-center gap-2 text-xs">
+                                {sessionMode === 'vosk' && (
+                                    <span className="inline-flex items-center gap-2 rounded-full bg-amber-500/20 border border-amber-500/60 text-amber-200 px-3 py-1">
+                                        <Icons.ChipIcon className="w-4 h-4" />
+                                        Modo offline Vosk
+                                    </span>
+                                )}
+                                {sessionMode === 'gemini' && (
+                                    <span className="inline-flex items-center gap-2 rounded-full bg-cyan-500/20 border border-cyan-500/60 text-cyan-200 px-3 py-1">
+                                        <Icons.WifiIcon className="w-4 h-4" />
+                                        Modo online Gemini
+                                    </span>
+                                )}
+                                {isProcessingVosk && (
+                                    <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/60 text-emerald-200 animate-pulse">
+                                        <Icons.ClockIcon className="w-4 h-4" />
+                                        Processando áudio offline...
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                        {settings.useVoskStt && (
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                                <label htmlFor="vosk-language" className="text-sm text-gray-300">
+                                    Idioma da transcrição offline
+                                </label>
+                                <select
+                                    id="vosk-language"
+                                    value={voskLanguage}
+                                    onChange={(event) => setVoskLanguage(event.target.value)}
+                                    className="w-full sm:w-64 bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                                    disabled={isSessionActive && sessionMode === 'vosk'}
+                                >
+                                    {VOSK_LANGUAGE_OPTIONS.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                            {option.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
                         <div className="text-center mb-6 flex flex-col items-center gap-4">
                             <button
                                 onClick={isSessionActive ? stopConversation : startConversation}

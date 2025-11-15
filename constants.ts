@@ -1,6 +1,10 @@
 
 import { Language, Settings } from './types';
 
+// Vosk STT service URL (usado apenas pelo proxy)
+export const VOSK_SERVICE_URL = process.env.VITE_VOSK_SERVICE_URL || 'http://localhost:8200';
+
+
 export const SUPPORTED_LANGUAGES: Language[] = [
   { code: 'pt-BR', name: 'Português (BR)' },
   { code: 'en-US', name: 'Inglês (EUA)' },
@@ -30,4 +34,9 @@ export const DEFAULT_SETTINGS: Settings = {
   learningLanguage: 'en-US',
   voiceGender: 'female',
   piperVoiceModel: 'en_US-lessac-medium',
+  preferOfflineTranslation: false,
+  useVoskStt: false,
+  openRouterModelId: 'openrouter/auto',
+  openRouterIncludeFree: true,
+  openRouterIncludePaid: true,
 };

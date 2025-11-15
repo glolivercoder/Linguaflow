@@ -1,8 +1,9 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Settings, VoiceGender, AnkiDeckSummary, VoiceModelInfo } from '../types';
+import { Settings, VoiceGender, AnkiDeckSummary, VoiceModelInfo, OpenRouterModelSummary } from '../types';
 import { SUPPORTED_LANGUAGES } from '../constants';
 import { generateReferenceAudio, listVoiceModels } from '../services/pronunciationService';
+import { fetchOpenRouterModels } from '../services/voskService';
 
 interface SettingsViewProps {
   settings: Settings;
@@ -24,6 +25,24 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
   const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
   const [generatedModel, setGeneratedModel] = useState<string | null>(null);
   const backupFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModelSummary[]>([]);
+  const [isLoadingOpenRouter, setIsLoadingOpenRouter] = useState(false);
+  const [openRouterError, setOpenRouterError] = useState<string | null>(null);
+  const [modelSearch, setModelSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [modelsReloadToken, setModelsReloadToken] = useState(0);
+
+  const includeFree = settings.openRouterIncludeFree ?? true;
+  const includePaid = settings.openRouterIncludePaid ?? true;
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      setDebouncedSearch(modelSearch.trim());
+    }, 400);
+    return () => {
+      window.clearTimeout(handle);
+    };
+  }, [modelSearch]);
 
   useEffect(() => {
     const loadVoiceModels = async () => {
@@ -42,6 +61,44 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
 
     loadVoiceModels();
   }, []);
+
+  useEffect(() => {
+    if (!settings.useVoskStt) {
+      setOpenRouterModels([]);
+      setOpenRouterError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const loadModels = async () => {
+      try {
+        setIsLoadingOpenRouter(true);
+        setOpenRouterError(null);
+        const models = await fetchOpenRouterModels({
+          search: debouncedSearch,
+          includeFree,
+          includePaid,
+        });
+        if (!cancelled) {
+          setOpenRouterModels(models);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Falha ao carregar modelos do OpenRouter:', error);
+          setOpenRouterError('Não foi possível carregar os modelos do OpenRouter. Verifique sua conexão e a chave OPENROUTER_API_KEY.');
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingOpenRouter(false);
+        }
+      }
+    };
+
+    loadModels();
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.useVoskStt, includeFree, includePaid, debouncedSearch, modelsReloadToken]);
 
   const handleModelChange = (value: string) => {
     onSettingsChange({
@@ -62,6 +119,14 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
     const qualityLabel = info.quality ? info.quality.toUpperCase() : 'Qualidade indefinida';
     return `${info.key} • ${languageLabel} • ${qualityLabel}`;
   }, [settings.piperVoiceModel, voiceModels]);
+
+  const selectedOpenRouterLabel = useMemo(() => {
+    if (!settings.openRouterModelId) {
+      return 'openrouter/auto (padrão)';
+    }
+    const model = openRouterModels.find((item) => item.id === settings.openRouterModelId);
+    return model?.name ? `${model.name} (${model.id})` : settings.openRouterModelId;
+  }, [settings.openRouterModelId, openRouterModels]);
 
   const handleGenerateTestAudio = async () => {
     try {
@@ -143,6 +208,168 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
             className="hidden"
             onChange={handleBackupFileChange}
           />
+        </div>
+
+        <div className="space-y-4 p-4 bg-gray-800 rounded-lg">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-200">Voz de Conversa Offline (Vosk + OpenRouter)</h3>
+              <p className="text-xs text-gray-400 mt-1">
+                Ative para usar reconhecimento de fala offline com o modelo Vosk. A transcrição é enviada ao OpenRouter para gerar a resposta de IA e o áudio final é produzido via Piper TTS.
+              </p>
+            </div>
+            <label className="inline-flex items-center cursor-pointer">
+              <span className="mr-2 text-sm text-gray-300">Desativado</span>
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  checked={settings.useVoskStt ?? false}
+                  onChange={(event) => {
+                    onSettingsChange({
+                      ...settings,
+                      useVoskStt: event.target.checked,
+                    });
+                  }}
+                  className="sr-only"
+                />
+                <div className={`w-12 h-6 rounded-full transition-colors ${settings.useVoskStt ? 'bg-cyan-500' : 'bg-gray-600'}`}></div>
+                <div
+                  className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${settings.useVoskStt ? 'translate-x-6' : ''}`}
+                ></div>
+              </div>
+              <span className="ml-2 text-sm text-gray-300">Ativado</span>
+            </label>
+          </div>
+
+          {settings.useVoskStt && (
+            <div className="space-y-4 border border-gray-700 rounded-lg p-4 bg-gray-900/60">
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">
+                    Buscar modelos OpenRouter
+                  </label>
+                  <input
+                    value={modelSearch}
+                    onChange={(event) => setModelSearch(event.target.value)}
+                    placeholder="Digite parte do nome, descrição ou tags..."
+                    className="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <label className="inline-flex items-center gap-2 text-sm text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={includeFree}
+                      onChange={(event) =>
+                        onSettingsChange({
+                          ...settings,
+                          openRouterIncludeFree: event.target.checked,
+                        })
+                      }
+                      className="h-4 w-4 rounded border-gray-500 bg-gray-700 text-cyan-500 focus:ring-cyan-500"
+                    />
+                    Gratuitos
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-sm text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={includePaid}
+                      onChange={(event) =>
+                        onSettingsChange({
+                          ...settings,
+                          openRouterIncludePaid: event.target.checked,
+                        })
+                      }
+                      className="h-4 w-4 rounded border-gray-500 bg-gray-700 text-cyan-500 focus:ring-cyan-500"
+                    />
+                    Pagos
+                  </label>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex flex-col gap-2 text-xs text-gray-400 md:flex-row md:items-center md:justify-between">
+                  <div className="flex items-center gap-3">
+                    <span>Modelos disponíveis</span>
+                    <button
+                      onClick={() => setModelsReloadToken((token) => token + 1)}
+                      className="inline-flex items-center gap-1 rounded-md border border-gray-600 px-2 py-1 text-xs text-gray-200 hover:border-cyan-500 hover:text-cyan-300"
+                    >
+                      Atualizar
+                    </button>
+                  </div>
+
+                  <p className="text-xs text-gray-400">
+                    Modelo selecionado: {selectedOpenRouterLabel}
+                  </p>
+                </div>
+
+                <div className="relative min-h-[120px]">
+                  {isLoadingOpenRouter && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-gray-900/60 text-sm text-gray-300">
+                      Carregando modelos...
+                    </div>
+                  )}
+
+                  {openRouterError && !isLoadingOpenRouter && (
+                    <div className="rounded-md border border-rose-600 bg-rose-950/60 p-3 text-sm text-rose-200">
+                      {openRouterError}
+                    </div>
+                  )}
+
+                  {!openRouterError && !isLoadingOpenRouter && openRouterModels.length === 0 && (
+                    <div className="rounded-md border border-gray-700 bg-gray-900/60 p-3 text-sm text-gray-300">
+                      Nenhum modelo encontrado. Ajuste os filtros ou a busca.
+                    </div>
+                  )}
+
+                  {openRouterModels.length > 0 && (
+                    <div className="space-y-2">
+                      {openRouterModels.map((model) => (
+                        <button
+                          key={model.id}
+                          onClick={() =>
+                            onSettingsChange({
+                              ...settings,
+                              openRouterModelId: model.id,
+                            })
+                          }
+                          className={`w-full text-left rounded-md border px-3 py-2 transition-colors ${
+                            settings.openRouterModelId === model.id
+                              ? 'border-cyan-500 bg-cyan-900/30 text-cyan-100'
+                              : 'border-gray-700 bg-gray-900/40 text-gray-200 hover:border-cyan-600 hover:bg-gray-900'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-semibold">{model.name || model.id}</span>
+                            <span className="text-[10px] uppercase tracking-wider text-gray-400">
+                              {model.tags?.join(' • ') || 'sem tags'}
+                            </span>
+                          </div>
+                          {model.description && (
+                            <p className="mt-1 text-xs text-gray-300 line-clamp-2">{model.description}</p>
+                          )}
+                          <div className="mt-2 flex items-center justify-between text-[11px] text-gray-400">
+                            <span>ID: {model.id}</span>
+                            <span>
+                              Contexto: {model.context_length ?? 'desconhecido'} • Custos:{' '}
+                              {(() => {
+                                const pricing = model.pricing ?? {};
+                                const prompt = pricing['prompt'];
+                                const completion = pricing['completion'];
+                                if (prompt == null && completion == null) return 'n/d';
+                                return `${prompt ?? '?'} / ${completion ?? '?'}`;
+                              })()}
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div>

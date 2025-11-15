@@ -57,6 +57,25 @@ export const ImageIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
+export const ChipIcon = ({ className }: { className?: string }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M9 7a2 2 0 00-2 2v6a2 2 0 002 2h6a2 2 0 002-2V9a2 2 0 00-2-2H9z" />
+    <path fillRule="evenodd" d="M8 2a1 1 0 011-1h1a1 1 0 110 2v2h2V3a1 1 0 112 0v2h2V3a1 1 0 112 0v1a1 1 0 01-1 1h-1v2h1a1 1 0 011 1v1a1 1 0 01-2 0V9h-2v2h2v1a1 1 0 011 1v1a1 1 0 01-2 0v-1h-2v2h1a1 1 0 010 2h-1a1 1 0 01-1-1v-1H9v1a1 1 0 11-2 0v-1a1 1 0 011-1h1v-2H7v1a1 1 0 01-2 0v-1a1 1 0 011-1h1v-2H6a1 1 0 01-1-1v-1a1 1 0 112 0v1h2V9H7v1a1 1 0 01-2 0V9a1 1 0 011-1h1V6H6a1 1 0 01-1-1V4a1 1 0 012 0v1h2V3a1 1 0 011-1z" clipRule="evenodd" />
+  </svg>
+);
+
+export const WifiIcon = ({ className }: { className?: string }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 9a15.915 15.915 0 0119.5 0M5.25 12.75a10.642 10.642 0 0113.5 0M8.25 16.5a5.368 5.368 0 017.5 0M12 20.25h.008v.008H12v-.008z" />
+  </svg>
+);
+
+export const ClockIcon = ({ className }: { className?: string }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+  </svg>
+);
+
 export const CubeIcon = ({ className }: { className?: string }) => (
     <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9.75l-9-5.25m9 5.25l9-5.25" />

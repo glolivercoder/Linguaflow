@@ -31,6 +31,10 @@ export interface Settings {
   voiceGender: VoiceGender;
   piperVoiceModel?: string;
   preferOfflineTranslation?: boolean;
+  useVoskStt?: boolean;
+  openRouterModelId?: string;
+  openRouterIncludeFree?: boolean;
+  openRouterIncludePaid?: boolean;
 }
 
 export type View = 'conversation' | 'flashcards' | 'settings' | 'anki' | 'smartLearn' | 'licoes';
@@ -61,6 +65,15 @@ export interface RawCategory {
 export interface RawFlashcardData {
     phrases: RawCategory;
     objects: RawCategory;
+}
+
+export interface OpenRouterModelSummary {
+    id: string;
+    name?: string;
+    description?: string;
+    context_length?: number;
+    pricing?: Record<string, unknown> | null;
+    tags?: string[] | null;
 }
 
 // --- Types for Anki Importer ---

@@ -5,19 +5,23 @@ import { createServer } from 'http';
 import { ALLOWED_ORIGINS, PORT } from './config.js';
 import { registerGeminiRoutes } from './routes/gemini.js';
 import { registerPixabayRoutes } from './routes/pixabay.js';
+import { registerOpenRouterRoutes } from './routes/openrouter.js';
+import { registerVoskRoutes } from './routes/vosk.js';
 import { attachGeminiLiveProxy } from './ws/geminiLive.js';
 
 const app = express();
 
 const corsOptions = {
   origin: (origin, callback) => {
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+    if (ALLOWED_ORIGINS === '*' || !origin || ALLOWED_ORIGINS.includes(origin)) {
       return callback(null, true);
     }
     console.warn(`[proxy] Bloqueando origem não autorizada: ${origin}`);
     return callback(new Error('Origin not allowed by CORS'));
   },
   credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
 app.use(cors(corsOptions));
@@ -54,6 +58,8 @@ app.get('/healthz', (req, res) => {
 
 registerGeminiRoutes(app);
 registerPixabayRoutes(app);
+registerOpenRouterRoutes(app);
+registerVoskRoutes(app);
 
 const server = createServer(app);
 attachGeminiLiveProxy(server);

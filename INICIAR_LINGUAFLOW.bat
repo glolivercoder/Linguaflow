@@ -10,6 +10,8 @@ set "PROXY_DIR=%SCRIPT_DIR%backend\proxy"
 set "PROXY_HEALTH=http://localhost:3100/healthz"
 set "ARGOS_DIR=%SCRIPT_DIR%backend\anki_import"
 set "ARGOS_HEALTH=http://localhost:8100/health"
+set "VOSK_DIR=%SCRIPT_DIR%backend\vosk_service"
+set "VOSK_HEALTH=http://localhost:8200/health"
 
 echo ========================================
 echo   🚀 LINGUAFLOW - Sistema de Ingles
@@ -46,7 +48,7 @@ if not exist logs mkdir logs
 REM ========================================
 REM 1. INICIAR PROXY DE INTEGRACOES (NODE)
 REM ========================================
-echo [1/3] Iniciando Proxy de Integracoes (Gemini/Pixabay)...
+echo [1/5] Iniciando Proxy de Integracoes (Gemini/Pixabay)...
 echo.
 
 if not exist "%PROXY_DIR%" (
@@ -91,7 +93,7 @@ echo.
 REM ========================================
 REM 2. INICIAR BACKEND DE PRONUNCIA (VENV)
 REM ========================================
-echo [2/3] Iniciando Backend de Pronuncia (Python venv + Piper TTS)...
+echo [2/5] Iniciando Backend de Pronuncia (Python venv + Piper TTS)...
 echo.
 
 cd backend\pronunciation
@@ -160,9 +162,45 @@ if %errorlevel% equ 0 (
 echo.
 
 REM ========================================
-REM 3. INICIAR SERVIÇO ARGOS (TRADUÇÃO OFFLINE)
+REM 3. INICIAR SERVIÇO DE CONVERSA OFFLINE (VOSK + OPENROUTER)
 REM ========================================
-echo [3/4] Iniciando Serviço de Tradução Offline (Argos)...
+echo [3/5] Iniciando Serviço de Conversa Offline (Vosk STT + OpenRouter LLM + Piper TTS)...
+echo.
+
+if not exist "%VOSK_DIR%" (
+    echo ⚠️  AVISO: Diretório backend\vosk_service não encontrado.
+    echo     Verifique se o serviço Vosk foi configurado antes de continuar.
+    goto AFTER_VOSK
+)
+
+python -c "import vosk" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo ⚠️  Vosk não encontrado no Python atual.
+    echo     Execute: python -m pip install -r backend\vosk_service\requirements.txt
+)
+
+echo Iniciando serviço Vosk...
+start "LinguaFlow Vosk STT" cmd /k "cd /d %SCRIPT_DIR% && python -m uvicorn backend.vosk_service.main:app --host 0.0.0.0 --port 8200"
+
+echo Aguardando Vosk inicializar (6 segundos)...
+timeout /t 6 /nobreak >nul
+
+echo Verificando saúde do serviço Vosk...
+curl -s "%VOSK_HEALTH%" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo ✅ Serviço Vosk respondendo corretamente!
+) else (
+    echo ⚠️  Serviço Vosk pode não estar pronto ainda...
+    echo    Verifique manualmente em: %VOSK_HEALTH%
+)
+echo.
+
+:AFTER_VOSK
+
+REM ========================================
+REM 4. INICIAR SERVIÇO ARGOS (TRADUÇÃO OFFLINE)
+REM ========================================
+echo [4/5] Iniciando Serviço de Tradução Offline (Argos)...
 echo.
 
 if not exist "%ARGOS_DIR%" (
@@ -209,9 +247,9 @@ echo.
 :AFTER_ARGOS
 
 REM ========================================
-REM 4. INICIAR FRONTEND (REACT)
+REM 5. INICIAR FRONTEND (REACT)
 REM ========================================
-echo [4/4] Iniciando Frontend (React)...
+echo [5/5] Iniciando Frontend (React)...
 echo.
 
 REM Verificar se node_modules existe
@@ -249,8 +287,11 @@ echo   ✅ LINGUAFLOW INICIADO COM SUCESSO!
 echo ========================================
 echo.
 echo 📡 Servidores ativos:
-echo    Backend:  http://localhost:8000
-echo    Frontend: http://localhost:3001
+echo    Pronúncia:       http://localhost:8000
+echo    Proxy Gemini:    http://localhost:3100
+echo    Vosk STT/LLM:    http://localhost:8200
+echo    Argos Translate: http://localhost:8100
+echo    Frontend:        http://localhost:3001
 echo.
 echo 📋 Para testar pronuncia:
 echo    1. Clique em "Licoes"
@@ -258,8 +299,11 @@ echo    2. Clique em "Pronuncia"
 echo    3. Teste as frases!
 echo.
 echo ⚠️  Para PARAR os servidores:
-echo    - Backend: Feche a janela "LinguaFlow Pronunciation API" ou use Ctrl+C
-echo    - Frontend: Feche a janela "LinguaFlow Frontend" ou use Ctrl+C
+echo    - Pronúncia:      Feche a janela "LinguaFlow Pronunciation API" ou use Ctrl+C
+echo    - Vosk STT/LLM:   Feche a janela "LinguaFlow Vosk STT" ou use Ctrl+C
+echo    - Argos:          Feche a janela "LinguaFlow Argos Service" ou use Ctrl+C
+echo    - Proxy Gemini:   Feche a janela "LinguaFlow Proxy" ou use Ctrl+C
+echo    - Frontend:       Feche a janela "LinguaFlow Frontend" ou use Ctrl+C
 echo.
 echo 📝 Logs e informacoes:
 echo    - Backend: Janela "LinguaFlow Pronunciation API"

@@ -391,7 +391,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans">
+    <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-inter">
       <header className="bg-gray-800 shadow-md p-4 flex justify-between items-center">
         <h1 className="text-xl md:text-2xl font-bold text-white">
           LinguaFlow <span className="text-cyan-400">AI</span>

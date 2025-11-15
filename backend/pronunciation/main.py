@@ -56,9 +56,17 @@ app.add_middleware(
 )
 
 # Initialize analyzers
+logger.info("Inicializando PronunciationAnalyzer...")
 pronunciation_analyzer = PronunciationAnalyzer()
+logger.info("PronunciationAnalyzer pronto.")
+
+logger.info("Inicializando PronunciationScorer...")
 pronunciation_scorer = PronunciationScorer()
+logger.info("PronunciationScorer pronto.")
+
+logger.info("Inicializando ReferenceAudioGenerator...")
 reference_generator = ReferenceAudioGenerator()
+logger.info("ReferenceAudioGenerator pronto.")
 
 # Serve generated reference audio files so the frontend can fetch them
 references_dir = Path(reference_generator.references_dir)
