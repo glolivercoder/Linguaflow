@@ -14,8 +14,8 @@ export default defineConfig(({ mode }) => {
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
             "font-src 'self' data: https://fonts.gstatic.com; " +
             "connect-src 'self' http://localhost:* http://127.0.0.1:* http://localhost:3100 ws://localhost:3100 ws: wss: https://pixabay.com https://xgozq2lbwxa4loze4irwn52pse0wgbxm.lambda-url.us-east-1.on.aws https://openrouter.ai https://openrouter.ai/api/v1; " +
-            "img-src 'self' data: blob: https://*.pixabay.com https://*.pixabay.com; " +
-            "media-src 'self' blob: data: http://localhost:* http://127.0.0.1:* https://*.pixabay.com;"
+            "img-src 'self' data: blob: https: http: https://pixabay.com https://*.pixabay.com https://cdn.pixabay.com https://i.pixabay.com https://cdn.statically.io; " +
+            "media-src 'self' blob: data: http: https: http://localhost:* http://127.0.0.1:* https://pixabay.com https://*.pixabay.com https://cdn.pixabay.com https://i.pixabay.com;"
         }
       },
       plugins: [react()],
