@@ -243,6 +243,7 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
 
     const loadImagesForCards = async () => {
       console.log('[FlashcardsView] Starting auto-load for', cards.length, 'cards');
+      
       for (const card of cards) {
         // Skip if already processed by auto-load (not manually changed)
         if (autoLoadedCardsRef.current.has(card.id)) {
@@ -250,11 +251,17 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
           continue;
         }
 
+        // Mark this card as processed, but don't block retries on errors
         autoLoadedCardsRef.current.add(card.id);
         
-        // Only fetch if card has no image OR has the default image from flashcardData
-        // (we want to replace defaults with Pixabay results)
-        const needsPixabayImage = !card.imageUrl || card.imageUrl.includes('cdn.pixabay.com/photo/');
+        // Try to load a new image if:
+        // 1. No image exists, OR
+        // 2. The image is from Pixabay (might be a placeholder), OR
+        // 3. The image is from any HTTP source (might be broken)
+        const needsPixabayImage = !card.imageUrl || 
+                                (card.imageUrl && 
+                                 (card.imageUrl.includes('pixabay.com') || 
+                                  card.imageUrl.startsWith('http')));
         
         console.log('[FlashcardsView] Card image check:', { 
           cardId: card.id, 
@@ -263,24 +270,51 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
           currentUrl: card.imageUrl 
         });
         
-        if (needsPixabayImage) {
+        if (needsPixabayImage && card.translatedText?.trim()) {
           try {
             console.log('[FlashcardsView] Fetching images for:', card.translatedText);
             const images = await searchImages(card.translatedText);
             console.log('[FlashcardsView] Received images:', images.length);
-            if (images.length > 0) {
-              console.log('[FlashcardsView] Applying first image to card:', card.id);
-              await onImageChange(card.id, images[0]);
+            
+            if (images && images.length > 0) {
+              const imageUrl = images[0];
+              console.log('[FlashcardsView] Applying image to card:', { 
+                cardId: card.id,
+                imageUrl: imageUrl.substring(0, 50) + '...' 
+              });
+              
+              // Preload the image before setting it
+              await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = resolve;
+                img.onerror = () => reject(new Error('Failed to load image'));
+                img.src = imageUrl;
+              });
+              
+              await onImageChange(card.id, imageUrl);
+            } else {
+              console.warn('[FlashcardsView] No images found for:', card.translatedText);
             }
           } catch (error) {
-            console.error('[FlashcardsView] Failed to auto-assign image for card', { cardId: card.id, error });
+            console.error('[FlashcardsView] Failed to auto-assign image for card', { 
+              cardId: card.id, 
+              error: error instanceof Error ? error.message : String(error),
+              stack: error instanceof Error ? error.stack : undefined
+            });
           }
         }
       }
       console.log('[FlashcardsView] Auto-load completed');
     };
 
-    loadImagesForCards();
+    // Add a small delay to ensure the component is fully mounted
+    const timer = setTimeout(() => {
+      loadImagesForCards().catch(error => {
+        console.error('[FlashcardsView] Error in loadImagesForCards:', error);
+      });
+    }, 500);
+
+    return () => clearTimeout(timer);
   }, [activeTab, cards, onImageChange]);
   
   const handleImageSelect = (imageUrl: string) => {
