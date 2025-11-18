@@ -8,7 +8,8 @@ import { chatWithAudio, encodeInt16ToWavBase64, mergeInt16Chunks } from '../serv
 import { Settings, Flashcard, LanguageCode } from '../types';
 import { SUPPORTED_LANGUAGES, VOICE_CONFIG } from '../constants';
 import * as Icons from './icons';
-import { getPhonetics, translateText, getPronunciationCorrection, getGroundedAnswer } from '../services/geminiService';
+// getPhonetics removido para desabilitar transcrição fonética
+import { translateText, getPronunciationCorrection, getGroundedAnswer } from '../services/geminiService';
 import { PROXY_WS_URL } from '../services/proxyClient';
 import {
     CATEGORY_DEFINITIONS,
@@ -634,7 +635,8 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
         const originalText = lastTurn.user;
         const translatedText = lastTurn.model;
 
-        const phoneticText = await getPhonetics(translatedText, learningLanguageName, nativeLangName);
+        // Transcrição fonética desabilitada
+        const phoneticText = "";
 
         addFlashcard({
             originalText,

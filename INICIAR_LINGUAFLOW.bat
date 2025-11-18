@@ -12,6 +12,8 @@ set "ARGOS_DIR=%SCRIPT_DIR%backend\anki_import"
 set "ARGOS_HEALTH=http://localhost:8100/health"
 set "VOSK_DIR=%SCRIPT_DIR%backend\vosk_service"
 set "VOSK_HEALTH=http://localhost:8200/health"
+set "ANKI_IMPORT_DIR=%SCRIPT_DIR%backend\anki_import"
+set "ANKI_IMPORT_HEALTH=http://localhost:8003/health"
 
 echo ========================================
 echo   🚀 LINGUAFLOW - Sistema de Ingles
@@ -249,7 +251,53 @@ echo.
 REM ========================================
 REM 5. INICIAR FRONTEND (REACT)
 REM ========================================
-echo [5/5] Iniciando Frontend (React)...
+echo [5/6] Iniciando Anki Import (Porta 8003)...
+echo.
+
+if not exist "%ANKI_IMPORT_DIR%" (
+    echo ⚠️  AVISO: Diretório backend\anki_import não encontrado.
+    echo     O serviço de importação de baralhos Anki não será iniciado.
+    echo     Certifique-se de que o diretório existe e tente novamente.
+    goto AFTER_ANKI_IMPORT
+)
+
+pushd "%ANKI_IMPORT_DIR%"
+
+echo Verificando se a porta 8003 esta disponivel...
+netstat -ano | findstr :8003 >nul
+if %errorlevel% equ 0 (
+    echo ⚠️  AVISO: A porta 8003 ja esta em uso!
+    echo     O serviço de importação de baralhos Anki não será iniciado.
+    echo     Verifique se o serviço já está em execução ou feche o aplicativo que está usando a porta 8003.
+    popd
+    goto AFTER_ANKI_IMPORT
+)
+
+echo Iniciando servidor Anki Import...
+start "LinguaFlow Anki Import" cmd /k "cd /d "%ANKI_IMPORT_DIR%" && call .\venv\Scripts\activate.bat && uvicorn main:app --reload --host 0.0.0.0 --port 8003"
+
+popd
+
+echo Aguardando servidor Anki Import inicializar (5 segundos)...
+timeout /t 5 /nobreak >nul
+
+echo Verificando saude do Anki Import...
+curl -s "%ANKI_IMPORT_HEALTH%" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo ✅ Anki Import respondendo corretamente!
+    echo    Acesse: http://localhost:8003/docs
+) else (
+    echo ⚠️  Anki Import pode nao estar pronto ainda...
+    echo    Verifique manualmente em: %ANKI_IMPORT_HEALTH%
+)
+echo.
+
+:AFTER_ANKI_IMPORT
+
+REM ========================================
+REM 6. INICIAR FRONTEND (REACT)
+REM ========================================
+echo [6/6] Iniciando Frontend (React)...
 echo.
 
 REM Verificar se node_modules existe
@@ -283,37 +331,41 @@ start http://localhost:3001
 
 echo.
 echo ========================================
-echo   ✅ LINGUAFLOW INICIADO COM SUCESSO!
+echo    LINGUAFLOW INICIADO COM SUCESSO!
 echo ========================================
 echo.
-echo 📡 Servidores ativos:
+echo  Servidores ativos:
 echo    Pronúncia:       http://localhost:8000
 echo    Proxy Gemini:    http://localhost:3100
 echo    Vosk STT/LLM:    http://localhost:8200
 echo    Argos Translate: http://localhost:8100
+echo    Anki Import:     http://localhost:8003
 echo    Frontend:        http://localhost:3001
 echo.
-echo 📋 Para testar pronuncia:
+echo  Para testar pronuncia:
 echo    1. Clique em "Licoes"
 echo    2. Clique em "Pronuncia"
 echo    3. Teste as frases!
 echo.
-echo ⚠️  Para PARAR os servidores:
+echo  Para PARAR os servidores:
 echo    - Pronúncia:      Feche a janela "LinguaFlow Pronunciation API" ou use Ctrl+C
 echo    - Vosk STT/LLM:   Feche a janela "LinguaFlow Vosk STT" ou use Ctrl+C
 echo    - Argos:          Feche a janela "LinguaFlow Argos Service" ou use Ctrl+C
 echo    - Proxy Gemini:   Feche a janela "LinguaFlow Proxy" ou use Ctrl+C
+echo    - Anki Import:    Feche a janela "LinguaFlow Anki Import" ou use Ctrl+C
 echo    - Frontend:       Feche a janela "LinguaFlow Frontend" ou use Ctrl+C
 echo.
-echo 📝 Logs e informacoes:
+echo  Logs e informacoes:
 echo    - Backend: Janela "LinguaFlow Pronunciation API"
 echo    - Frontend: Janela "LinguaFlow Frontend"
 echo    - API Docs: http://localhost:8000/docs
+echo    - Anki Import: http://localhost:8003/docs
 echo.
-echo 🔧 Troubleshooting:
+echo  Troubleshooting:
 echo    - Se backend falhar: Execute backend\pronunciation\setup_piper_venv.bat
 echo    - Teste backend: backend\pronunciation\test_piper_integration.py
 echo    - Documentacao: backend\pronunciation\INICIO_RAPIDO.md
+echo    - Para importar baralhos Anki: Acesse http://localhost:8003/docs
 echo.
 echo Pressione qualquer tecla para sair deste terminal...
 echo (Os servidores continuarao rodando nas outras janelas)
@@ -323,3 +375,4 @@ goto CLEANUP_AND_EXIT
 popd
 endlocal
 pause >nul
+
