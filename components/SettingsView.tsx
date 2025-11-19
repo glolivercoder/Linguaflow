@@ -3,6 +3,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Settings, VoiceGender, AnkiDeckSummary, VoiceModelInfo, OpenRouterModelSummary } from '../types';
 import { SUPPORTED_LANGUAGES } from '../constants';
 import { generateReferenceAudio, listVoiceModels } from '../services/pronunciationService';
+import { translateText, getPhonetics } from '../services/geminiService';
+import { CATEGORY_DEFINITIONS, CATEGORY_KEYS, BASE_CATEGORY_LANGUAGE_NAME, type QAItem, type CategoryDefinition, type CategorySection, type PhraseSection, type TranslatedCategories } from '../data/conversationCategories';
+import { saveCategoryTranslations, getCategoryPhonetic, saveCategoryPhonetic } from '../services/db';
 import { fetchOpenRouterModels } from '../services/voskService';
 
 interface SettingsViewProps {
@@ -31,6 +34,9 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
   const [modelSearch, setModelSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [modelsReloadToken, setModelsReloadToken] = useState(0);
+  const [isPreprocessing, setIsPreprocessing] = useState(false);
+  const [preprocessStatus, setPreprocessStatus] = useState('');
+  const [preprocessProgress, setPreprocessProgress] = useState(0);
 
   const includeFree = settings.openRouterIncludeFree ?? true;
   const includePaid = settings.openRouterIncludePaid ?? true;
@@ -171,6 +177,91 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
     }
   };
 
+  const handlePreprocessCategories = async () => {
+    try {
+      setIsPreprocessing(true);
+      setPreprocessStatus('Preparando categorias...');
+      setPreprocessProgress(0);
+      const englishName = 'English (US)';
+      const nativeName = SUPPORTED_LANGUAGES.find(l => l.code === settings.nativeLanguage)?.name || settings.nativeLanguage;
+      const out: Partial<TranslatedCategories> = {};
+      let totalTexts = 0;
+      for (const key of CATEGORY_KEYS) {
+        const base = CATEGORY_DEFINITIONS[key];
+        const sections: CategorySection[] = [];
+        for (const section of base.sections) {
+          if (section.type === 'phrases') {
+            const items: string[] = [];
+            for (const it of section.items as string[]) {
+              const tr = await translateText(it, BASE_CATEGORY_LANGUAGE_NAME, englishName);
+              items.push(tr && tr !== 'Erro na tradução.' ? tr : it);
+              totalTexts++;
+            }
+            sections.push({ ...section, heading: await translateText(section.heading, BASE_CATEGORY_LANGUAGE_NAME, englishName), items } as PhraseSection);
+          } else {
+            const items: QAItem[] = [];
+            for (const it of section.items as QAItem[]) {
+              const q = await translateText(it.question, BASE_CATEGORY_LANGUAGE_NAME, englishName);
+              const a = await translateText(it.answer, BASE_CATEGORY_LANGUAGE_NAME, englishName);
+              items.push({ question: q, answer: a });
+              totalTexts += 2;
+            }
+            sections.push({ ...section, heading: await translateText(section.heading, BASE_CATEGORY_LANGUAGE_NAME, englishName), items } as CategorySection);
+          }
+        }
+        const translated: CategoryDefinition = {
+          ...base,
+          title: await translateText(base.title, BASE_CATEGORY_LANGUAGE_NAME, englishName),
+          description: await translateText(base.description, BASE_CATEGORY_LANGUAGE_NAME, englishName),
+          roleInstruction: await translateText(base.roleInstruction, BASE_CATEGORY_LANGUAGE_NAME, englishName),
+          kickoffPrompt: await translateText(base.kickoffPrompt, BASE_CATEGORY_LANGUAGE_NAME, englishName),
+          sections,
+        };
+        (out as TranslatedCategories)[key] = translated;
+      }
+      const merged = out as TranslatedCategories;
+      await saveCategoryTranslations('en-US', merged);
+      setPreprocessStatus('Gerando fonética...');
+      let processed = 0;
+      for (const key of CATEGORY_KEYS) {
+        const cat = merged[key];
+        for (const section of cat.sections) {
+          if (section.type === 'qa') {
+            for (const it of section.items as QAItem[]) {
+              const texts = [it.question, it.answer];
+              for (const t of texts) {
+                const cached = await getCategoryPhonetic('en-US', settings.nativeLanguage, t);
+                if (!cached) {
+                  const ph = await getPhonetics(t, englishName, nativeName);
+                  await saveCategoryPhonetic('en-US', settings.nativeLanguage, t, ph);
+                }
+                processed++;
+                setPreprocessProgress(Math.round((processed / totalTexts) * 100));
+              }
+            }
+          } else {
+            for (const t of section.items as string[]) {
+              const cached = await getCategoryPhonetic('en-US', settings.nativeLanguage, t);
+              if (!cached) {
+                const ph = await getPhonetics(t, englishName, nativeName);
+                await saveCategoryPhonetic('en-US', settings.nativeLanguage, t, ph);
+              }
+              processed++;
+              setPreprocessProgress(Math.round((processed / totalTexts) * 100));
+            }
+          }
+        }
+      }
+      setPreprocessStatus('Concluído');
+    } catch (error) {
+      console.error('Falha no pré-processamento:', error);
+      setPreprocessStatus('Falha');
+      window.alert('Falha ao pré-processar categorias. Verifique a conexão e tente novamente.');
+    } finally {
+      setIsPreprocessing(false);
+    }
+  };
+
   return (
     <div className="p-4 md:p-6 h-full flex flex-col animate-fade-in">
       <h2 className="text-2xl font-bold mb-6 text-cyan-400">Configurações</h2>
@@ -208,6 +299,25 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
             className="hidden"
             onChange={handleBackupFileChange}
           />
+        </div>
+
+        <div className="p-4 bg-gray-800 rounded-lg space-y-3">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-200">Pré-processamento de conteúdo</h3>
+            <p className="text-xs text-gray-400 mt-1">Gera e salva no banco as traduções fixas em inglês e as transcrições fonéticas de todas as categorias.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handlePreprocessCategories}
+              disabled={isPreprocessing}
+              className="px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text_white font-semibold rounded-md transition-colors disabled:opacity-60"
+            >
+              {isPreprocessing ? 'Processando...' : 'Pré-processar agora'}
+            </button>
+            {preprocessStatus && (
+              <span className="text-xs text-gray-300">{preprocessStatus} {preprocessProgress ? `• ${preprocessProgress}%` : ''}</span>
+            )}
+          </div>
         </div>
 
         <div className="space-y-4 p-4 bg-gray-800 rounded-lg">

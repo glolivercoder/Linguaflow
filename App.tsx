@@ -12,6 +12,9 @@ import LicoesView from './components/LicoesView';
 import { SettingsIcon, BookOpenIcon, MicIcon, CubeIcon } from './components/icons';
 import { GraduationCap } from 'lucide-react';
 import * as db from './services/db';
+import { translateText, getPhonetics } from './services/geminiService';
+import { CATEGORY_DEFINITIONS, CATEGORY_KEYS, BASE_CATEGORY_LANGUAGE_NAME, type QAItem, type CategoryDefinition, type CategorySection, type PhraseSection, type TranslatedCategories } from './data/conversationCategories';
+import { saveCategoryTranslations, getCategoryTranslations, getCategoryPhonetic, saveCategoryPhonetic } from './services/db';
 import { ImageOverride } from './services/db';
 import { downloadPixabayLogs, clearPixabayLogs, addPixabayLog, getPixabayLogs } from './services/pixabayLogger';
 
@@ -67,6 +70,9 @@ const App: React.FC = () => {
   const [phoneticCache, setPhoneticCache] = useState<Awaited<ReturnType<typeof db.getAllPhonetics>>>([]);
   const [imageOverrides, setImageOverrides] = useState<ImageOverride[]>([]);
   const [ankiDecks, setAnkiDecks] = useState<AnkiDeckSummary[]>([]);
+  const [isAutoPreprocessing, setIsAutoPreprocessing] = useState(false);
+  const [autoPreprocessStatus, setAutoPreprocessStatus] = useState('');
+  const [autoPreprocessProgress, setAutoPreprocessProgress] = useState(0);
 
   // Load initial data from DB on component mount
   useEffect(() => {
@@ -96,6 +102,121 @@ const App: React.FC = () => {
     };
     loadData();
   }, []);
+
+  const autoPreprocessIfNeeded = useCallback(async (currentSettings: Settings) => {
+    try {
+      setIsAutoPreprocessing(true);
+      setAutoPreprocessStatus('Verificando cache...');
+      setAutoPreprocessProgress(0);
+      const englishName = 'English (US)';
+      const nativeName = currentSettings.nativeLanguage;
+      const enExisting = await getCategoryTranslations('en-US');
+      const needsFix = (existing: TranslatedCategories | null): boolean => {
+        if (!existing) return true;
+        for (const key of CATEGORY_KEYS) {
+          const base = CATEGORY_DEFINITIONS[key];
+          const enCat = existing[key];
+          if (!enCat) return true;
+          if (enCat.sections.length !== base.sections.length) return true;
+          for (let i = 0; i < base.sections.length; i++) {
+            const s = base.sections[i];
+            const es = enCat.sections[i];
+            if (!es) return true;
+            if (s.type === 'phrases') {
+              const srcItems = s.items as string[];
+              const enItems = es.items as string[];
+              if (enItems.length !== srcItems.length) return true;
+              for (let j = 0; j < srcItems.length; j++) {
+                const pt = (srcItems[j] || '').trim();
+                const en = (enItems[j] || '').trim();
+                if (!en || en.toLowerCase() === pt.toLowerCase()) return true;
+              }
+            }
+          }
+        }
+        return false;
+      };
+
+      if (!needsFix(enExisting)) {
+        setAutoPreprocessStatus('Cache pronto');
+        setAutoPreprocessProgress(100);
+        setIsAutoPreprocessing(false);
+        return;
+      }
+
+      const out: Partial<TranslatedCategories> = {};
+      setAutoPreprocessStatus('Preparando categorias...');
+      for (const key of CATEGORY_KEYS) {
+        const base = CATEGORY_DEFINITIONS[key];
+        const sections: CategorySection[] = [];
+        for (const section of base.sections) {
+          if (section.type === 'phrases') {
+            const items: string[] = [];
+            for (const it of section.items as string[]) {
+              const tr = await translateText(it, BASE_CATEGORY_LANGUAGE_NAME, englishName);
+              items.push(tr && tr !== 'Erro na tradução.' ? tr : it);
+            }
+            sections.push({ ...section, heading: await translateText(section.heading, BASE_CATEGORY_LANGUAGE_NAME, englishName), items } as PhraseSection);
+          } else {
+            const items: QAItem[] = [];
+            for (const it of section.items as QAItem[]) {
+              const q = await translateText(it.question, BASE_CATEGORY_LANGUAGE_NAME, englishName);
+              const a = await translateText(it.answer, BASE_CATEGORY_LANGUAGE_NAME, englishName);
+              items.push({ question: q, answer: a });
+            }
+            sections.push({ ...section, heading: await translateText(section.heading, BASE_CATEGORY_LANGUAGE_NAME, englishName), items } as CategorySection);
+          }
+        }
+        const translated: CategoryDefinition = {
+          ...base,
+          title: await translateText(base.title, BASE_CATEGORY_LANGUAGE_NAME, englishName),
+          description: await translateText(base.description, BASE_CATEGORY_LANGUAGE_NAME, englishName),
+          roleInstruction: await translateText(base.roleInstruction, BASE_CATEGORY_LANGUAGE_NAME, englishName),
+          kickoffPrompt: await translateText(base.kickoffPrompt, BASE_CATEGORY_LANGUAGE_NAME, englishName),
+          sections,
+        };
+        (out as TranslatedCategories)[key] = translated;
+      }
+
+      const merged = out as TranslatedCategories;
+      await saveCategoryTranslations('en-US', merged);
+
+      setAutoPreprocessStatus('Gerando fonética...');
+      const texts: string[] = [];
+      CATEGORY_KEYS.forEach((key) => {
+        const cat = merged[key];
+        cat.sections.forEach((section) => {
+          if (section.type === 'qa') {
+            (section.items as QAItem[]).forEach((it) => { texts.push(it.question); texts.push(it.answer); });
+          } else {
+            (section.items as string[]).forEach((it) => texts.push(it));
+          }
+        });
+      });
+      let processed = 0;
+      const total = texts.length;
+      for (const t of texts) {
+        const cached = await getCategoryPhonetic('en-US', currentSettings.nativeLanguage, t);
+        if (!cached) {
+          const ph = await getPhonetics(t, englishName, nativeName);
+          await saveCategoryPhonetic('en-US', currentSettings.nativeLanguage, t, ph);
+        }
+        processed++;
+        setAutoPreprocessProgress(Math.round((processed / total) * 100));
+      }
+      setAutoPreprocessStatus('Concluído');
+    } catch (error) {
+      console.error('[App] Auto preprocess failed:', error);
+    }
+    finally {
+      setIsAutoPreprocessing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!settings) return;
+    autoPreprocessIfNeeded(settings);
+  }, [settings, autoPreprocessIfNeeded]);
   
   // This memoized value will re-calculate ONLY when settings or user flashcards change.
   // This is a more robust and declarative way to handle data processing.
@@ -223,6 +344,9 @@ const App: React.FC = () => {
       setImageOverrides(savedImageOverrides);
       setAnkiDecks(savedAnkiDecks);
       alert('Backup restaurado com sucesso!');
+      if (savedSettings) {
+        autoPreprocessIfNeeded(savedSettings);
+      }
     } catch (error) {
       console.error('Failed to import backup', error);
       alert('Falha ao restaurar backup. Verifique se o arquivo é válido.');
@@ -363,7 +487,7 @@ const App: React.FC = () => {
     }
     switch (view) {
       case 'conversation':
-        return <ConversationView settings={settings} addFlashcard={addFlashcard} />;
+        return <ConversationView settings={settings} addFlashcard={addFlashcard} isAutoPreprocessing={isAutoPreprocessing} autoPreprocessStatus={autoPreprocessStatus} autoPreprocessProgress={autoPreprocessProgress} />;
       case 'flashcards':
         // FIX: Corrected typo in function name from 'handleImagechange' to 'handleImageChange'.
         return <FlashcardsView categorizedFlashcards={categorizedFlashcards} settings={settings} onBack={() => setView('conversation')} onImageChange={handleImageChange} />;
@@ -386,7 +510,7 @@ const App: React.FC = () => {
       case 'licoes':
         return <LicoesView settings={settings} onBack={() => setView('conversation')} />;
       default:
-        return <ConversationView settings={settings} addFlashcard={addFlashcard} />;
+        return <ConversationView settings={settings} addFlashcard={addFlashcard} isAutoPreprocessing={isAutoPreprocessing} autoPreprocessStatus={autoPreprocessStatus} autoPreprocessProgress={autoPreprocessProgress} />;
     }
   };
 

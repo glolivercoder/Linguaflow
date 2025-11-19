@@ -73,12 +73,30 @@ db.version(5).stores({
   categoryTranslations: 'language',
 });
 
+db.version(6).stores({
+  settings: 'id',
+  flashcards: 'id, sourceType, ankiDeckId',
+  phonetics: 'cardId',
+  imageOverrides: 'cardId',
+  ankiDecks: 'id, importedAt',
+  categoryTranslations: 'language',
+  categoryPhonetics: 'key',
+});
+
 const settingsTable: Table<SettingsRecord, number> = db.table('settings');
 const flashcardsTable: Table<Flashcard, string> = db.table('flashcards');
 const phoneticsTable: Table<PhoneticCache, string> = db.table('phonetics');
 const imageOverridesTable: Table<ImageOverride, string> = db.table('imageOverrides');
 const ankiDecksTable: Table<AnkiDeckRecord, string> = db.table('ankiDecks');
 const categoryTranslationsTable: Table<CategoryTranslationRecord, LanguageCode> = db.table('categoryTranslations');
+export interface CategoryPhoneticRecord {
+  key: string; // `${targetLang}|${nativeLang}|${text}`
+  phonetic: string;
+  targetLanguage: LanguageCode;
+  nativeLanguage: LanguageCode;
+  updatedAt: string;
+}
+const categoryPhoneticsTable: Table<CategoryPhoneticRecord, string> = db.table('categoryPhonetics');
 
 
 // --- Settings ---
@@ -210,6 +228,41 @@ export const getAllCategoryTranslationRecords = async (): Promise<CategoryTransl
   return categoryTranslationsTable.toArray();
 };
 
+// --- Category Phonetics ---
+const makePhoneticKey = (target: LanguageCode, native: LanguageCode, text: string): string => {
+  return `${target}|${native}|${text}`;
+};
+
+export const saveCategoryPhonetic = async (
+  target: LanguageCode,
+  native: LanguageCode,
+  text: string,
+  phonetic: string,
+): Promise<void> => {
+  const key = makePhoneticKey(target, native, text);
+  await categoryPhoneticsTable.put({
+    key,
+    phonetic,
+    targetLanguage: target,
+    nativeLanguage: native,
+    updatedAt: new Date().toISOString(),
+  });
+};
+
+export const getCategoryPhonetic = async (
+  target: LanguageCode,
+  native: LanguageCode,
+  text: string,
+): Promise<string | null> => {
+  const key = makePhoneticKey(target, native, text);
+  const rec = await categoryPhoneticsTable.get(key);
+  return rec?.phonetic ?? null;
+};
+
+export const getAllCategoryPhonetics = async (): Promise<CategoryPhoneticRecord[]> => {
+  return categoryPhoneticsTable.toArray();
+};
+
 export interface DatabaseSnapshot {
   settings: Settings;
   flashcards: Flashcard[];
@@ -217,6 +270,7 @@ export interface DatabaseSnapshot {
   imageOverrides: ImageOverride[];
   ankiDecks: AnkiDeckSummary[];
   categoryTranslations: CategoryTranslationRecord[];
+  categoryPhonetics: CategoryPhoneticRecord[];
 }
 
 export const exportDatabaseSnapshot = async (): Promise<DatabaseSnapshot> => {
@@ -228,6 +282,7 @@ export const exportDatabaseSnapshot = async (): Promise<DatabaseSnapshot> => {
     getAnkiDeckSummaries(),
     getAllCategoryTranslationRecords(),
   ]);
+  const categoryPhonetics = await getAllCategoryPhonetics();
 
   return {
     settings,
@@ -236,6 +291,7 @@ export const exportDatabaseSnapshot = async (): Promise<DatabaseSnapshot> => {
     imageOverrides,
     ankiDecks,
     categoryTranslations,
+    categoryPhonetics,
   };
 };
 
@@ -281,6 +337,10 @@ export const importDatabaseSnapshot = async (snapshot: DatabaseSnapshot): Promis
 
       if (snapshot.categoryTranslations?.length) {
         await categoryTranslationsTable.bulkPut(snapshot.categoryTranslations);
+      }
+
+      if (snapshot.categoryPhonetics?.length) {
+        await categoryPhoneticsTable.bulkPut(snapshot.categoryPhonetics);
       }
     }
   );

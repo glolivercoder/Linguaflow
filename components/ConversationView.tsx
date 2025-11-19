@@ -25,7 +25,7 @@ import {
     type TranslatedCategories,
     type QAItem,
 } from '../data/conversationCategories';
-import { getCategoryTranslations, saveCategoryTranslations } from '../services/db';
+import { getCategoryTranslations, saveCategoryTranslations, getCategoryPhonetic, saveCategoryPhonetic } from '../services/db';
 
 const float32ToInt16 = (input: Float32Array): Int16Array => {
     const output = new Int16Array(input.length);
@@ -97,9 +97,12 @@ const cloneCategoryDefinitions = (source: Record<CategoryKey, CategoryDefinition
 interface ConversationViewProps {
   settings: Settings;
   addFlashcard: (card: Omit<Flashcard, 'id'>) => void;
+  isAutoPreprocessing?: boolean;
+  autoPreprocessStatus?: string;
+  autoPreprocessProgress?: number;
 }
 
-const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashcard }) => {
+const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashcard, isAutoPreprocessing, autoPreprocessStatus, autoPreprocessProgress }) => {
     const [isSessionActive, setIsSessionActive] = useState(false);
     const [status, setStatus] = useState('Pronto para começar');
     const [userTranscript, setUserTranscript] = useState('');
@@ -113,8 +116,18 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
     const [isTranslatingCategories, setIsTranslatingCategories] = useState(false);
     const [sessionMode, setSessionMode] = useState<'gemini' | 'vosk' | null>(null);
     const [voskLanguage, setVoskLanguage] = useState<string>('pt-BR');
-    const [replySuggestions, setReplySuggestions] = useState<{ en: string; ph: string; pt: string }[]>([]);
-    const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState(false);
+    const [autoPrepStatus, setAutoPrepStatus] = useState<string | null>(null);
+    const [isMicTransientActive, setIsMicTransientActive] = useState(false);
+
+    useEffect(() => {
+        if (isAutoPreprocessing && autoPreprocessStatus) {
+            const suffix = autoPreprocessProgress ? ` • ${autoPreprocessProgress}%` : '';
+            setAutoPrepStatus(`${autoPreprocessStatus}${suffix}`);
+        } else {
+            setAutoPrepStatus(null);
+        }
+    }, [isAutoPreprocessing, autoPreprocessStatus, autoPreprocessProgress]);
+    
 
     const socketRef = useRef<WebSocket | null>(null);
     // FIX: Initialize useRef with null to prevent TypeScript errors.
@@ -272,7 +285,16 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
 
     useEffect(() => {
         // Garantir inglês sempre disponível para exibir a primeira linha
-        ensureCategoryTranslations('en-US', 'English (US)').catch((error) => {
+        ensureCategoryTranslations('en-US', 'English (US)').then(async () => {
+            try {
+                const en = translatedByLangRef.current['en-US'];
+                if (en) {
+                    await saveCategoryTranslations('en-US', en);
+                }
+            } catch (e) {
+                console.error('Falha ao salvar traduções fixas em inglês:', e);
+            }
+        }).catch((error) => {
             console.error('Falha ao preparar traduções fixas em inglês:', error);
         });
     }, [ensureCategoryTranslations]);
@@ -308,10 +330,16 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
         (async () => {
             for (const t of missing) {
                 try {
+                    const cached = await getCategoryPhonetic('en-US', settings.nativeLanguage, t);
+                    if (cached) {
+                        if (!cancelled) phoneticsCacheRef.current[t] = cached;
+                        continue;
+                    }
                     const ph = await getPhonetics(t, 'English (US)', nativeLangName);
                     if (!cancelled) phoneticsCacheRef.current[t] = ph;
+                    await saveCategoryPhonetic('en-US', settings.nativeLanguage, t, ph);
                 } catch (e) {
-                    console.error('Erro ao gerar fonética:', e);
+                    console.error('Erro ao gerar/persistir fonética:', e);
                 }
             }
         })();
@@ -319,72 +347,80 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
     }, [activeTranslatedCategory, nativeLangName, settings.learningLanguage]);
 
     useEffect(() => {
-        if (selectedCategoryKey !== 'supermarket') return;
-        const base = CATEGORY_DEFINITIONS['supermarket'];
-        const enSet = translatedByLangRef.current['en-US'] ?? {} as TranslatedCategories;
-        const enCat = enSet['supermarket'];
-        const needsFix = () => {
-            if (!enCat) return true;
-            for (let i = 0; i < base.sections.length; i++) {
-                const s = base.sections[i];
-                const es = enCat.sections[i];
-                if (!es) return true;
-                if (s.type === 'phrases') {
-                    const srcItems = (s.items as string[]) || [];
-                    const enItems = (es.items as string[]) || [];
-                    if (enItems.length !== srcItems.length) return true;
-                    for (let j = 0; j < srcItems.length; j++) {
-                        const pt = (srcItems[j] || '').trim();
-                        const en = (enItems[j] || '').trim();
-                        if (!en || en.toLowerCase() === pt.toLowerCase()) return true;
+        const run = async () => {
+            const baseSet = CATEGORY_DEFINITIONS;
+            const existing = translatedByLangRef.current['en-US'] ?? {} as TranslatedCategories;
+            const out: Partial<TranslatedCategories> = { ...existing };
+            for (const key of CATEGORY_KEYS) {
+                const base = baseSet[key];
+                const enCat = existing[key];
+                let need = !enCat;
+                if (!need && enCat.sections.length === base.sections.length) {
+                    for (let i = 0; i < base.sections.length; i++) {
+                        const s = base.sections[i];
+                        const es = enCat.sections[i];
+                        if (!es) { need = true; break; }
+                        if (s.type === 'phrases') {
+                            const srcItems = s.items as string[];
+                            const enItems = es.items as string[];
+                            if (enItems.length !== srcItems.length) { need = true; break; }
+                            for (let j = 0; j < srcItems.length; j++) {
+                                const pt = (srcItems[j] || '').trim();
+                                const en = (enItems[j] || '').trim();
+                                if (!en || en.toLowerCase() === pt.toLowerCase()) { need = true; break; }
+                            }
+                        }
                     }
                 }
+                if (!need) continue;
+                const translated: CategoryDefinition = {
+                    ...base,
+                    title: await translateText(base.title, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
+                    description: await translateText(base.description, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
+                    roleInstruction: await translateText(base.roleInstruction, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
+                    kickoffPrompt: await translateText(base.kickoffPrompt, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
+                    sections: await Promise.all(base.sections.map(async (section) => {
+                        if (section.type === 'phrases') {
+                            const items = await Promise.all((section.items as string[]).map(async (it) => {
+                                const tr = await translateText(it, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)');
+                                return tr && tr !== 'Erro na tradução.' ? tr : it;
+                            }));
+                            return { ...section, heading: await translateText(section.heading, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'), items } as PhraseSection;
+                        }
+                        const items = await Promise.all((section.items as QAItem[]).map(async (it) => ({
+                            question: await translateText(it.question, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
+                            answer: await translateText(it.answer, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
+                        })));
+                        return { ...section, heading: await translateText(section.heading, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'), items } as QASection;
+                    })),
+                };
+                (out as TranslatedCategories)[key] = translated;
             }
-            return false;
-        };
-
-        const run = async () => {
-            if (!needsFix()) return;
-            const translated: CategoryDefinition = {
-                ...base,
-                title: await translateText(base.title, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
-                description: await translateText(base.description, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
-                roleInstruction: await translateText(base.roleInstruction, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
-                kickoffPrompt: await translateText(base.kickoffPrompt, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
-                sections: await Promise.all(base.sections.map(async (section) => {
-                    if (section.type === 'phrases') {
-                        const items = await Promise.all((section.items as string[]).map(async (it) => {
-                            const tr = await translateText(it, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)');
-                            return tr && tr !== 'Erro na tradução.' ? tr : it;
-                        }));
-                        return { ...section, heading: await translateText(section.heading, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'), items } as PhraseSection;
-                    }
-                    const items = await Promise.all((section.items as QAItem[]).map(async (it) => ({
-                        question: await translateText(it.question, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
-                        answer: await translateText(it.answer, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
-                    })));
-                    return { ...section, heading: await translateText(section.heading, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'), items } as QASection;
-                })),
-            };
-
-            const merged: TranslatedCategories = {
-                ...(translatedByLangRef.current['en-US'] ?? {} as TranslatedCategories),
-                supermarket: translated,
-            } as TranslatedCategories;
-
+            const merged = out as TranslatedCategories;
             translatedByLangRef.current['en-US'] = merged;
-            if (settings.learningLanguage === 'en-US') {
-                setTranslatedCategories(merged);
-            }
-            try {
-                await saveCategoryTranslations('en-US', merged);
-            } catch (e) {
-                console.error('Falha ao salvar traduções de supermercado:', e);
+            if (settings.learningLanguage === 'en-US') setTranslatedCategories(merged);
+            try { await saveCategoryTranslations('en-US', merged); } catch (e) {}
+            const texts: string[] = [];
+            CATEGORY_KEYS.forEach((key) => {
+                const cat = merged[key];
+                cat.sections.forEach((section) => {
+                    if (section.type === 'qa') {
+                        (section.items as QAItem[]).forEach((it) => { texts.push(it.question); texts.push(it.answer); });
+                    } else {
+                        (section.items as string[]).forEach((it) => texts.push(it));
+                    }
+                });
+            });
+            for (const t of texts) {
+                const cached = await getCategoryPhonetic('en-US', settings.nativeLanguage, t);
+                if (cached) { phoneticsCacheRef.current[t] = cached; continue; }
+                const ph = await getPhonetics(t, 'English (US)', nativeLangName);
+                phoneticsCacheRef.current[t] = ph;
+                await saveCategoryPhonetic('en-US', settings.nativeLanguage, t, ph);
             }
         };
-
-        run().catch((e) => console.error('Erro na tradução forçada do supermercado:', e));
-    }, [selectedCategoryKey, settings.learningLanguage]);
+        run().catch(() => {});
+    }, [settings.nativeLanguage, settings.learningLanguage]);
 
     const buildSystemPrompt = useCallback(() => {
         const baseInstruction = `Você é um professor/coach de conversação. O usuário fala ${nativeLangName} e você responde em ${learningLanguageName}. Conduza uma conversa guiada, explique quando necessário e mantenha respostas curtas.`;
@@ -781,72 +817,6 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
 
     const ENGLISH_NAME = 'English (US)';
 
-    const generateReplySuggestions = useCallback(async () => {
-        if (!activeCategoryDefinition) return;
-        setIsGeneratingSuggestions(true);
-        try {
-            const baseTexts: string[] = [];
-            activeCategoryDefinition.sections.forEach((section) => {
-                if (section.type === 'qa') {
-                    section.items.forEach((item) => baseTexts.push(item.answer));
-                } else {
-                    section.items.forEach((item) => baseTexts.push(item));
-                }
-            });
-
-            let englishCandidates: string[] = [];
-            if (settings.learningLanguage === 'en-US' && activeTranslatedCategory) {
-                activeTranslatedCategory.sections.forEach((section) => {
-                    if (section.type === 'qa') {
-                        (section.items as QAItem[]).forEach((item) => englishCandidates.push(item.answer));
-                    } else {
-                        (section.items as string[]).forEach((item) => englishCandidates.push(item));
-                    }
-                });
-            } else {
-                englishCandidates = await Promise.all(
-                    baseTexts.map((t) => translateText(t, BASE_CATEGORY_LANGUAGE_NAME, ENGLISH_NAME))
-                );
-            }
-
-            const pick = (arr: string[], n: number) => {
-                const copy = [...arr].filter(Boolean);
-                const out: string[] = [];
-                while (copy.length && out.length < n) {
-                    const idx = Math.floor(Math.random() * copy.length);
-                    out.push(copy.splice(idx, 1)[0]);
-                }
-                return out;
-            };
-
-            const selectedEN = pick(englishCandidates, 4);
-            const nativeName = nativeLangName;
-            const suggestions = await Promise.all(
-                selectedEN.map(async (en) => {
-                    const pt = await translateText(en, ENGLISH_NAME, BASE_CATEGORY_LANGUAGE_NAME);
-                    let ph = phoneticsCacheRef.current[en];
-                    if (!ph) {
-                        ph = await getPhonetics(en, ENGLISH_NAME, nativeName);
-                        phoneticsCacheRef.current[en] = ph;
-                    }
-                    return { en, ph, pt };
-                })
-            );
-            setReplySuggestions(suggestions);
-        } catch (e) {
-            console.error('Falha ao gerar sugestões:', e);
-            setReplySuggestions([]);
-        } finally {
-            setIsGeneratingSuggestions(false);
-        }
-    }, [activeCategoryDefinition, activeTranslatedCategory, nativeLangName, settings.learningLanguage]);
-
-    useEffect(() => {
-        if (selectedCategoryKey) {
-            generateReplySuggestions();
-        }
-    }, [selectedCategoryKey, generateReplySuggestions]);
-
     return (
         <div className="p-4 md:p-6 h-full flex flex-col">
             <div className="flex flex-col lg:flex-row gap-6 flex-grow">
@@ -871,6 +841,12 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                         </div>
                         <div className="flex items-center justify-between">
                             <span className="text-xs uppercase tracking-wide text-gray-400">Referência visual</span>
+                            {autoPrepStatus && (
+                                <span className="text-[11px] text-cyan-300 inline-flex items-center gap-1">
+                                    <Icons.ClockIcon className="w-3 h-3 animate-spin"/>
+                                    {autoPrepStatus}
+                                </span>
+                            )}
                             <button
                                 onClick={async () => {
                                     try {
@@ -881,12 +857,15 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                                         const baseItem = (activeCategoryDefinition!.sections[sectionIdx] as QASection).items[0] as QAItem;
                                         const enQ = enItem?.question ?? baseItem.question;
                                         const enA = enItem?.answer ?? baseItem.answer;
+                                        setStatus('Reproduzindo TTS...');
                                         await playAudio(enQ, 'en-US', settings.voiceGender);
                                         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                                         const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
                                         const src = ctx.createMediaStreamSource(stream);
                                         const proc = ctx.createScriptProcessor(4096, 1, 1);
                                         const chunks: Int16Array[] = [];
+                                        setIsMicTransientActive(true);
+                                        setStatus('Gravando resposta por 2.5s...');
                                         proc.onaudioprocess = (event) => {
                                             const inputData = event.inputBuffer.getChannelData(0);
                                             const int16 = new Int16Array(inputData.length);
@@ -895,17 +874,37 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                                         };
                                         src.connect(proc);
                                         proc.connect(ctx.destination);
-                                        await new Promise(r => setTimeout(r, 2500));
+                                        await new Promise(r => setTimeout(r, 10000));
                                         try { proc.disconnect(); } catch {}
                                         try { src.disconnect(); } catch {}
                                         stream.getTracks().forEach(t => t.stop());
+                                        setIsMicTransientActive(false);
                                         const merged = mergeInt16Chunks(chunks);
                                         const base64 = encodeInt16ToWavBase64(merged, ctx.sampleRate || 16000);
                                         const binary = atob(base64);
                                         const buf = new Uint8Array(binary.length);
                                         for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
                                         const blob = new Blob([buf], { type: 'audio/wav' });
-                                        await analyzePronunciation(blob, enA);
+                                        setStatus('Transcrevendo áudio...');
+                                        try {
+                                            const vosk = await chatWithAudio({
+                                                model: settings.openRouterModelId || 'google/gemma-2-9b-it',
+                                                audioBase64: base64,
+                                                systemPrompt: 'Transcribe the audio as English plain text. No extra commentary.',
+                                                language: 'en-US'
+                                            });
+                                            const transcription = vosk.transcription || '';
+                                            setUserTranscript(transcription);
+                                            userTranscriptRef.current = transcription;
+                                        } catch (e) {
+                                            console.error('Falha na transcrição offline:', e);
+                                        }
+                                        setStatus('Analisando pronúncia...');
+                                        const result = await analyzePronunciation(blob, enA);
+                                        const ok = (result.text_accuracy || 0) >= 70 && (result.overall_score || 0) >= 60;
+                                        const key = `${selectedCategoryKey || 'none'}:${sectionIdx}:0`;
+                                        qaCompletedRef.current[key] = ok;
+                                        setQaCompleted({ ...qaCompletedRef.current });
                                     } catch (e) {
                                         console.error('Falha ao reproduzir e gravar:', e);
                                     }
@@ -956,7 +955,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                                                             };
                                                             source.connect(processor);
                                                             processor.connect(inputCtx.destination);
-                                                            await new Promise((r) => setTimeout(r, 2500));
+                                                            await new Promise((r) => setTimeout(r, 10000));
                                                             try { processor.disconnect(); } catch {}
                                                             try { source.disconnect(); } catch {}
                                                             stream.getTracks().forEach(t => t.stop());
@@ -1015,30 +1014,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                                     </div>
                                 );
                             })}
-                            <div className="bg-gray-900/60 border border-gray-700 rounded-lg p-3 space-y-2">
-                                <div className="flex items-center justify-between">
-                                    <h3 className="text-sm font-semibold text-cyan-300">Sugestões de resposta</h3>
-                                    <button
-                                        onClick={generateReplySuggestions}
-                                        className="px-2 py-1 text-xs rounded-md bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50"
-                                        disabled={isGeneratingSuggestions}
-                                    >
-                                        {isGeneratingSuggestions ? 'Gerando...' : 'Gerar novas'}
-                                    </button>
-                                </div>
-                                <ul className="space-y-2 text-sm text-gray-200">
-                                    {replySuggestions.length === 0 && (
-                                        <li className="text-gray-400">Pressione "Gerar novas" para criar respostas específicas para este cenário.</li>
-                                    )}
-                                    {replySuggestions.map((s, i) => (
-                                        <li key={i} className="border border-gray-700 rounded-md p-2 bg-gray-900/40">
-                                            <p className="font-medium text-white">{s.en}</p>
-                                            <p className="text-emerald-300 italic">{s.ph}</p>
-                                            <p className="text-gray-300">{s.pt}</p>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
+                            
                         </div>
                     </aside>
                 )}
@@ -1091,9 +1067,9 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                         <div className="text-center mb-6 flex flex-col items-center gap-4">
                             <button
                                 onClick={isSessionActive ? stopConversation : startConversation}
-                                className={`p-4 rounded-full transition-all duration-300 ${isSessionActive ? 'bg-red-600 hover:bg-red-700 animate-pulse' : 'bg-green-600 hover:bg-green-700'}`}
+                                className={`p-4 rounded-full transition-all duration-300 ${(isSessionActive || isMicTransientActive) ? 'bg-red-600 hover:bg-red-700 animate-pulse' : 'bg-green-600 hover:bg-green-700'}`}
                             >
-                                {isSessionActive ? <Icons.StopIcon className="w-8 h-8 text-white" /> : <Icons.MicIcon className="w-8 h-8 text-white" />}
+                                {(isSessionActive || isMicTransientActive) ? <Icons.MicIcon className="w-8 h-8 text-white" /> : <Icons.MicIcon className="w-8 h-8 text-white" />}
                             </button>
                             <div className="flex flex-wrap justify-center gap-2">
                                 <button

@@ -149,6 +149,23 @@ export const CATEGORY_DEFINITIONS: Record<CategoryKey, CategoryDefinition> = {
     register: 'formal',
     sections: [
       {
+        type: 'qa',
+        heading: 'Pedidos guiados',
+        items: [
+          { question: 'Mesa para quantas pessoas?', answer: 'Uma mesa para duas pessoas, por favor.' },
+          { question: 'Já decidiram o pedido?', answer: 'Sim, eu gostaria de batatas fritas crocantes e um bife acebolado ao ponto médio.' },
+          { question: 'Desejam alguma bebida?', answer: 'Gostaria de água com gás e um suco de limão.' },
+          { question: 'Como prefere o ponto do bife?', answer: 'Ao ponto médio, por favor.' },
+          { question: 'Alguma restrição ou alergia alimentar?', answer: 'Não, nenhuma alergia.' },
+          { question: 'Desejam algum acompanhamento?', answer: 'Pode adicionar um purê de batata cremoso.' },
+          { question: 'Desejam entradas antes do prato principal?', answer: 'Não, podemos ir direto ao prato principal.' },
+          { question: 'Precisa de recomendação de prato ou bebida?', answer: 'Gostaria de uma recomendação de bebida que combine com o peixe.' },
+          { question: 'Tudo certo com o prato?', answer: 'Sim, está muito bom.' },
+          { question: 'Desejam sobremesa?', answer: 'Sim, uma porção de pudim de leite, por favor.' },
+          { question: 'Posso trazer a conta?', answer: 'Sim, por favor, pode trazer a conta.' },
+        ],
+      },
+      {
         type: 'phrases',
         heading: 'Pedidos comuns',
         items: [
