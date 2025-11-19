@@ -9,7 +9,9 @@ import { Settings, Flashcard, LanguageCode } from '../types';
 import { SUPPORTED_LANGUAGES, VOICE_CONFIG } from '../constants';
 import * as Icons from './icons';
 // getPhonetics removido para desabilitar transcrição fonética
-import { translateText, getPronunciationCorrection, getGroundedAnswer } from '../services/geminiService';
+import { translateText, getPronunciationCorrection, getGroundedAnswer, getPhonetics } from '../services/geminiService';
+import { playAudio } from '../services/ttsService';
+import { analyzePronunciation } from '../services/pronunciationService';
 import { PROXY_WS_URL } from '../services/proxyClient';
 import {
     CATEGORY_DEFINITIONS,
@@ -111,6 +113,8 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
     const [isTranslatingCategories, setIsTranslatingCategories] = useState(false);
     const [sessionMode, setSessionMode] = useState<'gemini' | 'vosk' | null>(null);
     const [voskLanguage, setVoskLanguage] = useState<string>('pt-BR');
+    const [replySuggestions, setReplySuggestions] = useState<{ en: string; ph: string; pt: string }[]>([]);
+    const [isGeneratingSuggestions, setIsGeneratingSuggestions] = useState(false);
 
     const socketRef = useRef<WebSocket | null>(null);
     // FIX: Initialize useRef with null to prevent TypeScript errors.
@@ -124,6 +128,10 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
     const nextStartTimeRef = useRef(0);
     const audioSourcesRef = useRef(new Set<AudioBufferSourceNode>());
     const translationCacheRef = useRef<Record<string, string>>({});
+    const phoneticsCacheRef = useRef<Record<string, string>>({});
+    const qaCompletedRef = useRef<Record<string, boolean>>({});
+    const [qaCompleted, setQaCompleted] = useState<Record<string, boolean>>({});
+    const qaItemRefs = useRef<Record<string, HTMLLIElement | null>>({});
     const translatedByLangRef = useRef<Record<LanguageCode, TranslatedCategories>>({});
     const userTranscriptRef = useRef('');
     const modelTranscriptRef = useRef('');
@@ -187,6 +195,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
 
             setIsTranslatingCategories(true);
             const translated: Partial<TranslatedCategories> = {};
+            const effectiveLangName = targetLangCode === 'en-US' ? 'English (US)' : targetLangName;
 
             const translateValue = async (text: string) => {
                 if (!text.trim()) return text;
@@ -195,7 +204,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                     return translationCacheRef.current[cacheKey];
                 }
                 try {
-                    const translatedText = await translateText(text, BASE_CATEGORY_LANGUAGE_NAME, targetLangName);
+                    const translatedText = await translateText(text, BASE_CATEGORY_LANGUAGE_NAME, effectiveLangName);
                     const sanitized = translatedText && translatedText !== 'Erro na tradução.' ? translatedText : text;
                     translationCacheRef.current[cacheKey] = sanitized;
                     return sanitized;
@@ -262,6 +271,13 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
     );
 
     useEffect(() => {
+        // Garantir inglês sempre disponível para exibir a primeira linha
+        ensureCategoryTranslations('en-US', 'English (US)').catch((error) => {
+            console.error('Falha ao preparar traduções fixas em inglês:', error);
+        });
+    }, [ensureCategoryTranslations]);
+
+    useEffect(() => {
         if (!useTranslatedCategories || !learningLanguageName) {
             setIsTranslatingCategories(false);
             return;
@@ -276,12 +292,107 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
     const activeCategoryDefinition = selectedCategoryKey ? CATEGORY_DEFINITIONS[selectedCategoryKey] : null;
     const activeTranslatedCategory = selectedCategoryKey ? translatedCategories[selectedCategoryKey] : null;
 
+    useEffect(() => {
+        if (!activeTranslatedCategory || settings.learningLanguage !== 'en-US') return;
+        const texts: string[] = [];
+        activeTranslatedCategory.sections.forEach((section) => {
+            if (section.type === 'qa') {
+                (section.items as QAItem[]).forEach((it) => { texts.push(it.question); texts.push(it.answer); });
+            } else {
+                (section.items as string[]).forEach((it) => texts.push(it));
+            }
+        });
+        const missing = texts.filter((t) => t && !phoneticsCacheRef.current[t]);
+        if (!missing.length) return;
+        let cancelled = false;
+        (async () => {
+            for (const t of missing) {
+                try {
+                    const ph = await getPhonetics(t, 'English (US)', nativeLangName);
+                    if (!cancelled) phoneticsCacheRef.current[t] = ph;
+                } catch (e) {
+                    console.error('Erro ao gerar fonética:', e);
+                }
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [activeTranslatedCategory, nativeLangName, settings.learningLanguage]);
+
+    useEffect(() => {
+        if (selectedCategoryKey !== 'supermarket') return;
+        const base = CATEGORY_DEFINITIONS['supermarket'];
+        const enSet = translatedByLangRef.current['en-US'] ?? {} as TranslatedCategories;
+        const enCat = enSet['supermarket'];
+        const needsFix = () => {
+            if (!enCat) return true;
+            for (let i = 0; i < base.sections.length; i++) {
+                const s = base.sections[i];
+                const es = enCat.sections[i];
+                if (!es) return true;
+                if (s.type === 'phrases') {
+                    const srcItems = (s.items as string[]) || [];
+                    const enItems = (es.items as string[]) || [];
+                    if (enItems.length !== srcItems.length) return true;
+                    for (let j = 0; j < srcItems.length; j++) {
+                        const pt = (srcItems[j] || '').trim();
+                        const en = (enItems[j] || '').trim();
+                        if (!en || en.toLowerCase() === pt.toLowerCase()) return true;
+                    }
+                }
+            }
+            return false;
+        };
+
+        const run = async () => {
+            if (!needsFix()) return;
+            const translated: CategoryDefinition = {
+                ...base,
+                title: await translateText(base.title, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
+                description: await translateText(base.description, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
+                roleInstruction: await translateText(base.roleInstruction, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
+                kickoffPrompt: await translateText(base.kickoffPrompt, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
+                sections: await Promise.all(base.sections.map(async (section) => {
+                    if (section.type === 'phrases') {
+                        const items = await Promise.all((section.items as string[]).map(async (it) => {
+                            const tr = await translateText(it, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)');
+                            return tr && tr !== 'Erro na tradução.' ? tr : it;
+                        }));
+                        return { ...section, heading: await translateText(section.heading, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'), items } as PhraseSection;
+                    }
+                    const items = await Promise.all((section.items as QAItem[]).map(async (it) => ({
+                        question: await translateText(it.question, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
+                        answer: await translateText(it.answer, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'),
+                    })));
+                    return { ...section, heading: await translateText(section.heading, BASE_CATEGORY_LANGUAGE_NAME, 'English (US)'), items } as QASection;
+                })),
+            };
+
+            const merged: TranslatedCategories = {
+                ...(translatedByLangRef.current['en-US'] ?? {} as TranslatedCategories),
+                supermarket: translated,
+            } as TranslatedCategories;
+
+            translatedByLangRef.current['en-US'] = merged;
+            if (settings.learningLanguage === 'en-US') {
+                setTranslatedCategories(merged);
+            }
+            try {
+                await saveCategoryTranslations('en-US', merged);
+            } catch (e) {
+                console.error('Falha ao salvar traduções de supermercado:', e);
+            }
+        };
+
+        run().catch((e) => console.error('Erro na tradução forçada do supermercado:', e));
+    }, [selectedCategoryKey, settings.learningLanguage]);
+
     const buildSystemPrompt = useCallback(() => {
-        const baseInstruction = `Você é um parceiro de conversação bilíngue. O usuário fala ${nativeLangName} e você responde em ${learningLanguageName}. Mantenha as respostas curtas e conversacionais.`;
-        const scenario = activeCategoryDefinition
-            ? ` Contexto da simulação: ${activeCategoryDefinition.roleInstruction} Use perguntas e respostas condizentes com este cenário e encoraje o usuário a praticar o vocabulário correspondente.`
-            : '';
-        return `${baseInstruction}${scenario}`;
+        const baseInstruction = `Você é um professor/coach de conversação. O usuário fala ${nativeLangName} e você responde em ${learningLanguageName}. Conduza uma conversa guiada, explique quando necessário e mantenha respostas curtas.`;
+        const scenario = activeCategoryDefinition ? ` Contexto da simulação: ${activeCategoryDefinition.roleInstruction}` : '';
+        const registerHint = activeCategoryDefinition?.register === 'informal'
+            ? ' Use dialeto americano informal com gírias e contrações naturais.'
+            : ' Use inglês americano formal, educado e profissional; evite gírias.';
+        return `${baseInstruction}${scenario}${registerHint}`;
     }, [activeCategoryDefinition, learningLanguageName, nativeLangName]);
 
     const processVoskConversation = useCallback(
@@ -635,8 +746,9 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
         const originalText = lastTurn.user;
         const translatedText = lastTurn.model;
 
-        // Transcrição fonética desabilitada
-        const phoneticText = "";
+        const learningLangName = SUPPORTED_LANGUAGES.find(l => l.code === settings.learningLanguage)?.name || settings.learningLanguage;
+        const nativeLangName2 = SUPPORTED_LANGUAGES.find(l => l.code === settings.nativeLanguage)?.name || settings.nativeLanguage;
+        const phoneticText = await getPhonetics(translatedText, learningLangName, nativeLangName2);
 
         addFlashcard({
             originalText,
@@ -667,6 +779,74 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
         return useTranslatedCategories ? `${flag} Ver em Português` : `${flag} Traduzir`;
     }, [useTranslatedCategories, settings.nativeLanguage]);
 
+    const ENGLISH_NAME = 'English (US)';
+
+    const generateReplySuggestions = useCallback(async () => {
+        if (!activeCategoryDefinition) return;
+        setIsGeneratingSuggestions(true);
+        try {
+            const baseTexts: string[] = [];
+            activeCategoryDefinition.sections.forEach((section) => {
+                if (section.type === 'qa') {
+                    section.items.forEach((item) => baseTexts.push(item.answer));
+                } else {
+                    section.items.forEach((item) => baseTexts.push(item));
+                }
+            });
+
+            let englishCandidates: string[] = [];
+            if (settings.learningLanguage === 'en-US' && activeTranslatedCategory) {
+                activeTranslatedCategory.sections.forEach((section) => {
+                    if (section.type === 'qa') {
+                        (section.items as QAItem[]).forEach((item) => englishCandidates.push(item.answer));
+                    } else {
+                        (section.items as string[]).forEach((item) => englishCandidates.push(item));
+                    }
+                });
+            } else {
+                englishCandidates = await Promise.all(
+                    baseTexts.map((t) => translateText(t, BASE_CATEGORY_LANGUAGE_NAME, ENGLISH_NAME))
+                );
+            }
+
+            const pick = (arr: string[], n: number) => {
+                const copy = [...arr].filter(Boolean);
+                const out: string[] = [];
+                while (copy.length && out.length < n) {
+                    const idx = Math.floor(Math.random() * copy.length);
+                    out.push(copy.splice(idx, 1)[0]);
+                }
+                return out;
+            };
+
+            const selectedEN = pick(englishCandidates, 4);
+            const nativeName = nativeLangName;
+            const suggestions = await Promise.all(
+                selectedEN.map(async (en) => {
+                    const pt = await translateText(en, ENGLISH_NAME, BASE_CATEGORY_LANGUAGE_NAME);
+                    let ph = phoneticsCacheRef.current[en];
+                    if (!ph) {
+                        ph = await getPhonetics(en, ENGLISH_NAME, nativeName);
+                        phoneticsCacheRef.current[en] = ph;
+                    }
+                    return { en, ph, pt };
+                })
+            );
+            setReplySuggestions(suggestions);
+        } catch (e) {
+            console.error('Falha ao gerar sugestões:', e);
+            setReplySuggestions([]);
+        } finally {
+            setIsGeneratingSuggestions(false);
+        }
+    }, [activeCategoryDefinition, activeTranslatedCategory, nativeLangName, settings.learningLanguage]);
+
+    useEffect(() => {
+        if (selectedCategoryKey) {
+            generateReplySuggestions();
+        }
+    }, [selectedCategoryKey, generateReplySuggestions]);
+
     return (
         <div className="p-4 md:p-6 h-full flex flex-col">
             <div className="flex flex-col lg:flex-row gap-6 flex-grow">
@@ -692,11 +872,48 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                         <div className="flex items-center justify-between">
                             <span className="text-xs uppercase tracking-wide text-gray-400">Referência visual</span>
                             <button
-                                onClick={() => setUseTranslatedCategories((prev) => !prev)}
-                                className={`px-3 py-1 text-sm rounded-md border ${useTranslatedCategories ? 'border-cyan-500 text-cyan-300 bg-cyan-900/30' : 'border-gray-600 text-gray-200 bg-gray-700/40'}`}
-                                title={useTranslatedCategories ? 'Mostrar conteúdo em português' : `Traduzir para ${getLanguageDisplayName(settings.learningLanguage)}`}
+                                onClick={async () => {
+                                    try {
+                                        const sectionIdx = activeCategoryDefinition?.sections.findIndex(s => s.type === 'qa') ?? -1;
+                                        if (sectionIdx < 0) return;
+                                        const englishSection = translatedByLangRef.current['en-US']?.[selectedCategoryKey!]?.sections[sectionIdx] as QASection | undefined;
+                                        const enItem = englishSection?.items?.[0] as QAItem | undefined;
+                                        const baseItem = (activeCategoryDefinition!.sections[sectionIdx] as QASection).items[0] as QAItem;
+                                        const enQ = enItem?.question ?? baseItem.question;
+                                        const enA = enItem?.answer ?? baseItem.answer;
+                                        await playAudio(enQ, 'en-US', settings.voiceGender);
+                                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                                        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+                                        const src = ctx.createMediaStreamSource(stream);
+                                        const proc = ctx.createScriptProcessor(4096, 1, 1);
+                                        const chunks: Int16Array[] = [];
+                                        proc.onaudioprocess = (event) => {
+                                            const inputData = event.inputBuffer.getChannelData(0);
+                                            const int16 = new Int16Array(inputData.length);
+                                            for (let i = 0; i < inputData.length; i++) int16[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                                            chunks.push(int16);
+                                        };
+                                        src.connect(proc);
+                                        proc.connect(ctx.destination);
+                                        await new Promise(r => setTimeout(r, 2500));
+                                        try { proc.disconnect(); } catch {}
+                                        try { src.disconnect(); } catch {}
+                                        stream.getTracks().forEach(t => t.stop());
+                                        const merged = mergeInt16Chunks(chunks);
+                                        const base64 = encodeInt16ToWavBase64(merged, ctx.sampleRate || 16000);
+                                        const binary = atob(base64);
+                                        const buf = new Uint8Array(binary.length);
+                                        for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
+                                        const blob = new Blob([buf], { type: 'audio/wav' });
+                                        await analyzePronunciation(blob, enA);
+                                    } catch (e) {
+                                        console.error('Falha ao reproduzir e gravar:', e);
+                                    }
+                                }}
+                                className="px-2 py-1 text-xs rounded-md bg-cyan-600 hover:bg-cyan-700 text-white"
+                                title="Ouvir primeira frase e praticar"
                             >
-                                {translationButtonLabel}
+                                Ouvir & Praticar
                             </button>
                         </div>
                         {isTranslatingCategories && useTranslatedCategories && (
@@ -705,6 +922,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                         <div className="space-y-4 overflow-y-auto pr-2">
                             {activeCategoryDefinition.sections.map((section, index) => {
                                 const translatedSection = activeTranslatedCategory?.sections[index];
+                                const englishSection = translatedByLangRef.current['en-US']?.[selectedCategoryKey!]?.sections[index];
                                 const heading = useTranslatedCategories ? translatedSection?.heading : section.heading;
                                 const items = useTranslatedCategories ? translatedSection?.items ?? section.items : section.items;
                                 return (
@@ -712,12 +930,80 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                                         <h3 className="text-sm font-semibold text-cyan-300">{heading}</h3>
                                         {section.type === 'qa' ? (
                                             <ul className="space-y-2 text-sm text-gray-200">
-                                                {(items as QAItem[]).map((item, itemIndex) => (
-                                                    <li key={itemIndex} className="border border-gray-700 rounded-md p-2 bg-gray-900/40">
-                                                        <p className="font-medium text-white">{item.question}</p>
-                                                        <p className="text-gray-300">{item.answer}</p>
-                                                    </li>
-                                                ))}
+                                                {(items as QAItem[]).map((item, itemIndex) => {
+                                                    const base = (activeCategoryDefinition.sections[index] as QASection).items[itemIndex];
+                                                    const enSource = (englishSection as QASection | undefined)?.items?.[itemIndex];
+                                                    const enQ = enSource?.question ?? item.question ?? base.question;
+                                                    const enA = enSource?.answer ?? item.answer ?? base.answer;
+                                                    const ptQ = base.question;
+                                                    const ptA = base.answer;
+                                                    const phQ = phoneticsCacheRef.current[enQ] || '';
+                                                    const phA = phoneticsCacheRef.current[enA] || '';
+                                                    const key = `${selectedCategoryKey || 'none'}:${index}:${itemIndex}`;
+                                                    const playAndPractice = async () => {
+                                                        try {
+                                                            await playAudio(enQ, 'en-US', settings.voiceGender);
+                                                            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                                                            const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+                                                            const source = inputCtx.createMediaStreamSource(stream);
+                                                            const processor = inputCtx.createScriptProcessor(4096, 1, 1);
+                                                            const chunks: Int16Array[] = [];
+                                                            processor.onaudioprocess = (event) => {
+                                                                const inputData = event.inputBuffer.getChannelData(0);
+                                                                const int16 = new Int16Array(inputData.length);
+                                                                for (let i = 0; i < inputData.length; i++) int16[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                                                                chunks.push(int16);
+                                                            };
+                                                            source.connect(processor);
+                                                            processor.connect(inputCtx.destination);
+                                                            await new Promise((r) => setTimeout(r, 2500));
+                                                            try { processor.disconnect(); } catch {}
+                                                            try { source.disconnect(); } catch {}
+                                                            stream.getTracks().forEach(t => t.stop());
+                                                            const merged = mergeInt16Chunks(chunks);
+                                                            const base64 = encodeInt16ToWavBase64(merged, inputCtx.sampleRate || 16000);
+                                                            const binary = atob(base64);
+                                                            const buf = new Uint8Array(binary.length);
+                                                            for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
+                                                            const blob = new Blob([buf], { type: 'audio/wav' });
+                                                            const result = await analyzePronunciation(blob, enA);
+                                                            const ok = (result.text_accuracy || 0) >= 70 && (result.overall_score || 0) >= 60;
+                                                            qaCompletedRef.current[key] = ok;
+                                                            setQaCompleted({ ...qaCompletedRef.current });
+                                                            if (ok) {
+                                                                const nextKey = `${selectedCategoryKey || 'none'}:${index}:${itemIndex + 1}`;
+                                                                const el = qaItemRefs.current[nextKey];
+                                                                if (el) {
+                                                                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                                }
+                                                            }
+                                                        } catch (e) {
+                                                            console.error('Falha ao praticar item:', e);
+                                                        }
+                                                    };
+                                                    return (
+                                                        <li key={itemIndex} ref={el => { qaItemRefs.current[key] = el; }} className="relative border border-gray-700 rounded-md p-2 bg-gray-900/40">
+                                                            <div className="flex items-center justify-between">
+                                                                <p className="font-medium text-white">{enQ}</p>
+                                                                <button onClick={playAndPractice} className="text-cyan-300 hover:text-cyan-200" title="Ouvir e praticar">
+                                                                    <Icons.PlayIcon className="w-5 h-5"/>
+                                                                </button>
+                                                            </div>
+                                                            <p className="text-emerald-300 italic">{phQ}</p>
+                                                            <p className="text-gray-400">{ptQ}</p>
+                                                            <div className="mt-2">
+                                                                <p className="text-white">{enA}</p>
+                                                                <p className="text-emerald-300 italic">{phA}</p>
+                                                                <p className="text-gray-400">{ptA}</p>
+                                                            </div>
+                                                            {qaCompleted[key] && (
+                                                                <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 text-emerald-300">
+                                                                    <Icons.CheckCircleIcon className="w-4 h-4"/>
+                                                                </span>
+                                                            )}
+                                                        </li>
+                                                    );
+                                                })}
                                             </ul>
                                         ) : (
                                             <ul className="space-y-1 text-sm text-gray-200 list-disc list-inside">
@@ -729,6 +1015,30 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                                     </div>
                                 );
                             })}
+                            <div className="bg-gray-900/60 border border-gray-700 rounded-lg p-3 space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-sm font-semibold text-cyan-300">Sugestões de resposta</h3>
+                                    <button
+                                        onClick={generateReplySuggestions}
+                                        className="px-2 py-1 text-xs rounded-md bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50"
+                                        disabled={isGeneratingSuggestions}
+                                    >
+                                        {isGeneratingSuggestions ? 'Gerando...' : 'Gerar novas'}
+                                    </button>
+                                </div>
+                                <ul className="space-y-2 text-sm text-gray-200">
+                                    {replySuggestions.length === 0 && (
+                                        <li className="text-gray-400">Pressione "Gerar novas" para criar respostas específicas para este cenário.</li>
+                                    )}
+                                    {replySuggestions.map((s, i) => (
+                                        <li key={i} className="border border-gray-700 rounded-md p-2 bg-gray-900/40">
+                                            <p className="font-medium text-white">{s.en}</p>
+                                            <p className="text-emerald-300 italic">{s.ph}</p>
+                                            <p className="text-gray-300">{s.pt}</p>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
                         </div>
                     </aside>
                 )}

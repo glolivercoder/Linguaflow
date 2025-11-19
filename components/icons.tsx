@@ -81,3 +81,15 @@ export const CubeIcon = ({ className }: { className?: string }) => (
         <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9.75l-9-5.25m9 5.25l9-5.25" />
     </svg>
 );
+
+export const PlayIcon = ({ className }: { className?: string }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M5 3.878v16.244c0 .497.538.803.967.558l13.464-8.122a.648.648 0 000-1.116L5.967 3.32A.648.648 0 005 3.878z" />
+  </svg>
+);
+
+export const CheckCircleIcon = ({ className }: { className?: string }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+    <path fillRule="evenodd" d="M12 2a10 10 0 100 20 10 10 0 000-20zm4.243 7.243a1 1 0 00-1.414-1.414L11 11.657 9.172 9.83a1 1 0 10-1.414 1.414l2.536 2.536a1 1 0 001.414 0l4.536-4.536z" clipRule="evenodd" />
+  </svg>
+);
