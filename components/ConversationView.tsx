@@ -188,9 +188,47 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                 setIsTranslatingCategories(false);
                 return;
             }
+            const existing = translatedByLangRef.current[targetLangCode];
+            const needsFix = (existingCats?: TranslatedCategories): boolean => {
+                if (!existingCats) return true;
+                for (const key of CATEGORY_KEYS) {
+                    const base = CATEGORY_DEFINITIONS[key];
+                    const enCat = existingCats[key];
+                    if (!enCat) return true;
+                    if (enCat.sections.length !== base.sections.length) return true;
+                    for (let i = 0; i < base.sections.length; i++) {
+                        const s = base.sections[i];
+                        const es = enCat.sections[i];
+                        if (!es) return true;
+                        if (s.type === 'phrases') {
+                            const srcItems = s.items as string[];
+                            const enItems = es.items as string[];
+                            if (enItems.length !== srcItems.length) return true;
+                            for (let j = 0; j < srcItems.length; j++) {
+                                const pt = (srcItems[j] || '').trim();
+                                const en = (enItems[j] || '').trim();
+                                if (!en || en.toLowerCase() === pt.toLowerCase()) return true;
+                            }
+                        } else {
+                            const srcItems = s.items as QAItem[];
+                            const enItems = es.items as QAItem[];
+                            if (enItems.length !== srcItems.length) return true;
+                            for (let j = 0; j < srcItems.length; j++) {
+                                const ptQ = (srcItems[j].question || '').trim();
+                                const enQ = (enItems[j].question || '').trim();
+                                const ptA = (srcItems[j].answer || '').trim();
+                                const enA = (enItems[j].answer || '').trim();
+                                if (!enQ || enQ.toLowerCase() === ptQ.toLowerCase()) return true;
+                                if (!enA || enA.toLowerCase() === ptA.toLowerCase()) return true;
+                            }
+                        }
+                    }
+                }
+                return false;
+            };
 
-            if (translatedByLangRef.current[targetLangCode]) {
-                setTranslatedCategories(translatedByLangRef.current[targetLangCode]);
+            if (existing && !needsFix(existing)) {
+                setTranslatedCategories(existing);
                 setIsTranslatingCategories(false);
                 return;
             }

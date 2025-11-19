@@ -131,6 +131,18 @@ const App: React.FC = () => {
                 const en = (enItems[j] || '').trim();
                 if (!en || en.toLowerCase() === pt.toLowerCase()) return true;
               }
+            } else {
+              const srcItems = s.items as QAItem[];
+              const enItems = es.items as QAItem[];
+              if (enItems.length !== srcItems.length) return true;
+              for (let j = 0; j < srcItems.length; j++) {
+                const ptQ = (srcItems[j].question || '').trim();
+                const enQ = (enItems[j].question || '').trim();
+                const ptA = (srcItems[j].answer || '').trim();
+                const enA = (enItems[j].answer || '').trim();
+                if (!enQ || enQ.toLowerCase() === ptQ.toLowerCase()) return true;
+                if (!enA || enA.toLowerCase() === ptA.toLowerCase()) return true;
+              }
             }
           }
         }
