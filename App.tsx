@@ -229,40 +229,43 @@ const App: React.FC = () => {
     if (!settings) return;
     autoPreprocessIfNeeded(settings);
   }, [settings, autoPreprocessIfNeeded]);
-  
+
   // This memoized value will re-calculate ONLY when settings or user flashcards change.
   // This is a more robust and declarative way to handle data processing.
   const categorizedFlashcards = useMemo<CategorizedFlashcards>(() => {
     console.log('[App] Recalculating categorizedFlashcards. imageOverrides count:', imageOverrides.length);
-    
+
     if (!settings) {
       // If settings are not loaded yet, return an empty structure.
       return { phrases: {}, objects: {} };
     }
-    
+
     const { nativeLanguage, learningLanguage } = settings;
     const processed: CategorizedFlashcards = { phrases: {}, objects: {} };
 
     // Helper function to map raw card data to a displayable Flashcard object.
     const mapCard = (rawCard: RawCard): Flashcard => {
-        const phoneticText = phoneticCache.find(p => p.cardId === rawCard.id)?.phonetic || '';
-        const imageOverride = imageOverrides.find(o => o.cardId === rawCard.id);
-        
-        if (imageOverride) {
-          console.log('[App] Found imageOverride for card:', { cardId: rawCard.id, imageUrl: imageOverride.imageUrl });
-        }
-        
-        return {
-          id: rawCard.id,
-          originalText: rawCard.texts[nativeLanguage] || 'Texto não disponível',
-          translatedText: rawCard.texts[learningLanguage] || 'Tradução não disponível',
-          phoneticText,
-          originalLang: nativeLanguage,
-          translatedLang: learningLanguage,
-          imageUrl: imageOverride?.imageUrl || rawCard.imageUrl, // Use override if available
-        };
-    };
+      // Prioritize predefined phonetics, then fall back to cached phonetics
+      const predefinedPhonetic = rawCard.phoneticTexts?.[learningLanguage] || '';
+      const cachedPhonetic = phoneticCache.find(p => p.cardId === rawCard.id)?.phonetic || '';
+      const phoneticText = predefinedPhonetic || cachedPhonetic;
 
+      const imageOverride = imageOverrides.find(o => o.cardId === rawCard.id);
+
+      if (imageOverride) {
+        console.log('[App] Found imageOverride for card:', { cardId: rawCard.id, imageUrl: imageOverride.imageUrl });
+      }
+
+      return {
+        id: rawCard.id,
+        originalText: rawCard.texts[nativeLanguage] || 'Texto não disponível',
+        translatedText: rawCard.texts[learningLanguage] || 'Tradução não disponível',
+        phoneticText,
+        originalLang: nativeLanguage,
+        translatedLang: learningLanguage,
+        imageUrl: imageOverride?.imageUrl || rawCard.imageUrl, // Use override if available
+      };
+    };
     // Process all predefined phrases and objects.
     for (const category in PREDEFINED_FLASHCARD_DATA.phrases) {
       processed.phrases[category] = PREDEFINED_FLASHCARD_DATA.phrases[category].map(rawCard => mapCard(rawCard));
@@ -368,28 +371,28 @@ const App: React.FC = () => {
   const addFlashcard = useCallback((newCardData: Omit<Flashcard, 'id'>) => {
     const newCard: Flashcard = { ...newCardData, id: new Date().toISOString(), sourceType: 'manual' };
     db.addFlashcard(newCard).then(() => {
-        setUserFlashcards(prev => [...prev, newCard]);
+      setUserFlashcards(prev => [...prev, newCard]);
     });
   }, []);
-  
+
   const handleImageChange = useCallback(async (cardId: string, newImageUrl: string) => {
     addPixabayLog('info', 'Applying image to card', { cardId, imageUrl: newImageUrl });
     console.log('[App] handleImageChange called:', { cardId, newImageUrl });
-    
+
     // Use an "optimistic update" pattern.
     // 1. Update the state immediately for a responsive UI.
     setImageOverrides(prevOverrides => {
       const overrideExists = prevOverrides.some(o => o.cardId === cardId);
       const newOverrides = overrideExists
         ? prevOverrides.map(override =>
-            override.cardId === cardId
-              ? { ...override, imageUrl: newImageUrl }
-              : override
-          )
+          override.cardId === cardId
+            ? { ...override, imageUrl: newImageUrl }
+            : override
+        )
         : [...prevOverrides, { cardId, imageUrl: newImageUrl }];
-      
-      console.log('[App] Updated imageOverrides:', { 
-        oldCount: prevOverrides.length, 
+
+      console.log('[App] Updated imageOverrides:', {
+        oldCount: prevOverrides.length,
         newCount: newOverrides.length,
         updatedCard: newOverrides.find(o => o.cardId === cardId)
       });
@@ -408,7 +411,7 @@ const App: React.FC = () => {
     console.log('💾 [APP] Processing Anki cards for database');
     console.log(`📦 Received ${ankiCards.length} cards from parser`);
     console.log('='.repeat(80));
-    
+
     const now = Date.now();
     const newFlashcards: Flashcard[] = ankiCards.map((ankiCard, index) => {
       const deckId = ankiCard.deckId || UNKNOWN_ANKI_DECK_ID;
@@ -440,7 +443,7 @@ const App: React.FC = () => {
           imagePrefix: ankiCard.image?.substring(0, 50)
         });
       }
-      
+
       return flashcard;
     });
 
@@ -495,7 +498,7 @@ const App: React.FC = () => {
 
   const renderView = () => {
     if (!settings) {
-        return <div className="flex items-center justify-center h-full text-gray-400">Carregando configurações...</div>;
+      return <div className="flex items-center justify-center h-full text-gray-400">Carregando configurações...</div>;
     }
     switch (view) {
       case 'conversation':
@@ -516,7 +519,20 @@ const App: React.FC = () => {
           />
         );
       case 'anki':
-        return <AnkiView decks={ankiDeckCards} onImportComplete={handleAnkiImport} settings={settings} onBack={() => setView('conversation')} />;
+        return <AnkiView decks={ankiDeckCards} onImportComplete={handleAnkiImport} onConvertComplete={async (flashcards) => {
+          // Save converted flashcards to database
+          await db.bulkAddFlashcards(flashcards);
+          // Reload flashcards from DB
+          const [allFlashcards, allPhonetics, allImageOverrides] = await Promise.all([
+            db.getFlashcards(),
+            db.getAllPhonetics(),
+            db.getAllImageOverrides(),
+          ]);
+          setUserFlashcards(allFlashcards);
+          setPhoneticCache(allPhonetics);
+          setImageOverrides(allImageOverrides);
+          console.log(`[App] ${flashcards.length} cards converted and saved`);
+        }} settings={settings} onBack={() => setView('conversation')} />;
       case 'smartLearn':
         return <SmartLearnView settings={settings} onBack={() => setView('conversation')} />;
       case 'licoes':
@@ -608,8 +624,8 @@ const NavButton: React.FC<{
   <button
     onClick={onClick}
     className={`flex items-center space-x-2 px-3 py-2 rounded-md transition-colors text-sm font-medium ${isActive
-        ? 'bg-cyan-600 text-white'
-        : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+      ? 'bg-cyan-600 text-white'
+      : 'text-gray-300 hover:bg-gray-700 hover:text-white'
       }`}
   >
     {icon}

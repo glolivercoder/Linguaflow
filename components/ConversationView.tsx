@@ -26,6 +26,8 @@ import {
     type QAItem,
 } from '../data/conversationCategories';
 import { getCategoryTranslations, saveCategoryTranslations, getCategoryPhonetic, saveCategoryPhonetic } from '../services/db';
+import * as conversaCache from '../services/conversaCacheService';
+
 
 const float32ToInt16 = (input: Float32Array): Int16Array => {
     const output = new Int16Array(input.length);
@@ -95,11 +97,11 @@ const cloneCategoryDefinitions = (source: Record<CategoryKey, CategoryDefinition
 };
 
 interface ConversationViewProps {
-  settings: Settings;
-  addFlashcard: (card: Omit<Flashcard, 'id'>) => void;
-  isAutoPreprocessing?: boolean;
-  autoPreprocessStatus?: string;
-  autoPreprocessProgress?: number;
+    settings: Settings;
+    addFlashcard: (card: Omit<Flashcard, 'id'>) => void;
+    isAutoPreprocessing?: boolean;
+    autoPreprocessStatus?: string;
+    autoPreprocessProgress?: number;
 }
 
 const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashcard, isAutoPreprocessing, autoPreprocessStatus, autoPreprocessProgress }) => {
@@ -127,7 +129,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
             setAutoPrepStatus(null);
         }
     }, [isAutoPreprocessing, autoPreprocessStatus, autoPreprocessProgress]);
-    
+
 
     const socketRef = useRef<WebSocket | null>(null);
     // FIX: Initialize useRef with null to prevent TypeScript errors.
@@ -251,13 +253,28 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
             const translateValue = async (text: string) => {
                 if (!text.trim()) return text;
                 const cacheKey = `${targetLangCode}::${text}`;
+
+                // Check in-memory cache first
                 if (translationCacheRef.current[cacheKey]) {
                     return translationCacheRef.current[cacheKey];
                 }
+
+                // Check IndexedDB cache
+                const cachedTranslation = await conversaCache.getCachedTranslation(cacheKey);
+                if (cachedTranslation) {
+                    translationCacheRef.current[cacheKey] = cachedTranslation;
+                    return cachedTranslation;
+                }
+
+                // Call Gemini API if not cached
                 try {
                     const translatedText = await translateText(text, BASE_CATEGORY_LANGUAGE_NAME, effectiveLangName);
                     const sanitized = translatedText && translatedText !== 'Erro na tradução.' ? translatedText : text;
+
+                    // Save to both caches
                     translationCacheRef.current[cacheKey] = sanitized;
+                    await conversaCache.saveCachedTranslation(cacheKey, sanitized);
+
                     return sanitized;
                 } catch (error) {
                     console.error('Erro ao traduzir texto da categoria:', error);
@@ -368,14 +385,27 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
         (async () => {
             for (const t of missing) {
                 try {
+                    // Check old category phonetic cache first (for backward compatibility)
                     const cached = await getCategoryPhonetic('en-US', settings.nativeLanguage, t);
                     if (cached) {
                         if (!cancelled) phoneticsCacheRef.current[t] = cached;
                         continue;
                     }
+
+                    // Check new conversaCache
+                    const cachedPhonetic = await conversaCache.getCachedPhonetic(t);
+                    if (cachedPhonetic) {
+                        if (!cancelled) phoneticsCacheRef.current[t] = cachedPhonetic;
+                        continue;
+                    }
+
+                    // Call Gemini API if not cached
                     const ph = await getPhonetics(t, 'English (US)', nativeLangName);
                     if (!cancelled) phoneticsCacheRef.current[t] = ph;
+
+                    // Save to both caches
                     await saveCategoryPhonetic('en-US', settings.nativeLanguage, t, ph);
+                    await conversaCache.saveCachedPhonetic(t, ph);
                 } catch (e) {
                     console.error('Erro ao gerar/persistir fonética:', e);
                 }
@@ -437,7 +467,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
             const merged = out as TranslatedCategories;
             translatedByLangRef.current['en-US'] = merged;
             if (settings.learningLanguage === 'en-US') setTranslatedCategories(merged);
-            try { await saveCategoryTranslations('en-US', merged); } catch (e) {}
+            try { await saveCategoryTranslations('en-US', merged); } catch (e) { }
             const texts: string[] = [];
             CATEGORY_KEYS.forEach((key) => {
                 const cat = merged[key];
@@ -457,7 +487,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                 await saveCategoryPhonetic('en-US', settings.nativeLanguage, t, ph);
             }
         };
-        run().catch(() => {});
+        run().catch(() => { });
     }, [settings.nativeLanguage, settings.learningLanguage]);
 
     const buildSystemPrompt = useCallback(() => {
@@ -495,7 +525,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
 
                 const audioBase64 = encodeInt16ToWavBase64(merged, inputAudioContextRef.current?.sampleRate ?? 16000);
                 const modelId = settings.openRouterModelId?.trim() || 'openrouter/auto';
-                
+
                 const response = await chatWithAudio({
                     model: modelId,
                     audioBase64,
@@ -507,9 +537,9 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                 setModelTranscript(response.llm_response || '');
                 userTranscriptRef.current = response.transcription;
                 modelTranscriptRef.current = response.llm_response || '';
-                setLastTurn({ 
-                    user: response.transcription, 
-                    model: response.llm_response || '' 
+                setLastTurn({
+                    user: response.transcription,
+                    model: response.llm_response || ''
                 });
 
                 if (response.audio_base64) {
@@ -544,7 +574,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
 
         try {
             scriptProcessorRef.current?.disconnect();
-        } catch(e) {
+        } catch (e) {
             // The context might already be closed, which can cause an error here. Ignore it.
         }
         scriptProcessorRef.current = null;
@@ -553,17 +583,17 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
             inputAudioContextRef.current.close();
         }
         inputAudioContextRef.current = null;
-        
+
         if (outputAudioContextRef.current && outputAudioContextRef.current.state !== 'closed') {
             outputAudioContextRef.current.close();
         }
         outputAudioContextRef.current = null;
-        
+
         audioSourcesRef.current.forEach(s => {
-            try { s.stop(); } catch(e) { /* already stopped */ }
+            try { s.stop(); } catch (e) { /* already stopped */ }
         });
         audioSourcesRef.current.clear();
-        
+
         setIsSessionActive(false);
         userTranscriptRef.current = '';
         modelTranscriptRef.current = '';
@@ -881,7 +911,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                             <span className="text-xs uppercase tracking-wide text-gray-400">Referência visual</span>
                             {autoPrepStatus && (
                                 <span className="text-[11px] text-cyan-300 inline-flex items-center gap-1">
-                                    <Icons.ClockIcon className="w-3 h-3 animate-spin"/>
+                                    <Icons.ClockIcon className="w-3 h-3 animate-spin" />
                                     {autoPrepStatus}
                                 </span>
                             )}
@@ -913,8 +943,8 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                                         src.connect(proc);
                                         proc.connect(ctx.destination);
                                         await new Promise(r => setTimeout(r, 10000));
-                                        try { proc.disconnect(); } catch {}
-                                        try { src.disconnect(); } catch {}
+                                        try { proc.disconnect(); } catch { }
+                                        try { src.disconnect(); } catch { }
                                         stream.getTracks().forEach(t => t.stop());
                                         setIsMicTransientActive(false);
                                         const merged = mergeInt16Chunks(chunks);
@@ -994,8 +1024,8 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                                                             source.connect(processor);
                                                             processor.connect(inputCtx.destination);
                                                             await new Promise((r) => setTimeout(r, 10000));
-                                                            try { processor.disconnect(); } catch {}
-                                                            try { source.disconnect(); } catch {}
+                                                            try { processor.disconnect(); } catch { }
+                                                            try { source.disconnect(); } catch { }
                                                             stream.getTracks().forEach(t => t.stop());
                                                             const merged = mergeInt16Chunks(chunks);
                                                             const base64 = encodeInt16ToWavBase64(merged, inputCtx.sampleRate || 16000);
@@ -1023,7 +1053,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                                                             <div className="flex items-center justify-between">
                                                                 <p className="font-medium text-white">{enQ}</p>
                                                                 <button onClick={playAndPractice} className="text-cyan-300 hover:text-cyan-200" title="Ouvir e praticar">
-                                                                    <Icons.PlayIcon className="w-5 h-5"/>
+                                                                    <Icons.PlayIcon className="w-5 h-5" />
                                                                 </button>
                                                             </div>
                                                             <p className="text-emerald-300 italic">{phQ}</p>
@@ -1035,7 +1065,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                                                             </div>
                                                             {qaCompleted[key] && (
                                                                 <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 text-emerald-300">
-                                                                    <Icons.CheckCircleIcon className="w-4 h-4"/>
+                                                                    <Icons.CheckCircleIcon className="w-4 h-4" />
                                                                 </span>
                                                             )}
                                                         </li>
@@ -1052,7 +1082,7 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                                     </div>
                                 );
                             })}
-                            
+
                         </div>
                     </aside>
                 )}
@@ -1151,8 +1181,8 @@ const ConversationView: React.FC<ConversationViewProps> = ({ settings, addFlashc
                         )}
                     </div>
                     <div className="flex flex-col gap-4">
-                        <PronunciationPractice settings={settings}/>
-                        <GroundedSearch/>
+                        <PronunciationPractice settings={settings} />
+                        <GroundedSearch />
                     </div>
                 </div>
             </div>
@@ -1251,8 +1281,8 @@ const PronunciationPractice: React.FC<{ settings: Settings }> = ({ settings }) =
                 // A real implementation would transcribe audio to text first.
                 // Here, we simulate transcription for demonstration.
                 // This is a placeholder; real audio transcription would be complex.
-                const userTranscription = `(Transcrição simulada) ${textToPractice}`; 
-                
+                const userTranscription = `(Transcrição simulada) ${textToPractice}`;
+
                 const learningLangName = SUPPORTED_LANGUAGES.find(l => l.code === settings.learningLanguage)?.name || settings.learningLanguage;
                 const nativeLangName = SUPPORTED_LANGUAGES.find(l => l.code === settings.nativeLanguage)?.name || settings.nativeLanguage;
 
@@ -1260,7 +1290,7 @@ const PronunciationPractice: React.FC<{ settings: Settings }> = ({ settings }) =
                 setFeedback(correction);
                 setIsLoading(false);
                 audioChunksRef.current = [];
-                 stream.getTracks().forEach(track => track.stop());
+                stream.getTracks().forEach(track => track.stop());
             };
             mediaRecorderRef.current.start();
             setIsRecording(true);
@@ -1278,11 +1308,11 @@ const PronunciationPractice: React.FC<{ settings: Settings }> = ({ settings }) =
     return (
         <div className="w-full max-w-2xl bg-gray-800 p-6 rounded-lg shadow-lg mt-4">
             <h3 className="text-lg font-semibold text-cyan-400 mb-3">Praticar Pronúncia</h3>
-            <input 
+            <input
                 type="text"
                 value={textToPractice}
                 onChange={(e) => setTextToPractice(e.target.value)}
-                placeholder={`Digite uma frase em ${SUPPORTED_LANGUAGES.find(l=>l.code === settings.learningLanguage)?.name || ''}`}
+                placeholder={`Digite uma frase em ${SUPPORTED_LANGUAGES.find(l => l.code === settings.learningLanguage)?.name || ''}`}
                 className="w-full bg-gray-700 border-gray-600 rounded-md py-2 px-3 text-white mb-3"
             />
             <button
@@ -1299,12 +1329,12 @@ const PronunciationPractice: React.FC<{ settings: Settings }> = ({ settings }) =
 
 const GroundedSearch: React.FC = () => {
     const [query, setQuery] = useState('');
-    const [result, setResult] = useState<{text: string, sources: any[]} | null>(null);
+    const [result, setResult] = useState<{ text: string, sources: any[] } | null>(null);
     const [isLoading, setIsLoading] = useState(false);
 
     const handleSearch = async (e: React.FormEvent) => {
         e.preventDefault();
-        if(!query.trim()) return;
+        if (!query.trim()) return;
         setIsLoading(true);
         setResult(null);
         const response = await getGroundedAnswer(query);
@@ -1313,40 +1343,40 @@ const GroundedSearch: React.FC = () => {
     };
 
     return (
-         <div className="w-full max-w-2xl bg-gray-800 p-6 rounded-lg shadow-lg mt-4">
-             <h3 className="text-lg font-semibold text-cyan-400 mb-3">Pesquisa Inteligente</h3>
-             <form onSubmit={handleSearch} className="flex gap-2">
-                 <input
-                     type="text"
-                     value={query}
-                     onChange={e => setQuery(e.target.value)}
-                     placeholder="Pergunte sobre lugares, notícias, etc."
-                     className="flex-grow bg-gray-700 border-gray-600 rounded-md py-2 px-3 text-white"
-                 />
-                 <button type="submit" disabled={isLoading} className="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-2 px-4 rounded-md disabled:opacity-50">
-                     {isLoading ? 'Buscando...' : 'Perguntar'}
-                 </button>
-             </form>
-             {result && (
-                 <div className="mt-4 text-gray-300">
-                     <p className="whitespace-pre-wrap">{result.text}</p>
-                     {result.sources.length > 0 && (
-                         <div className="mt-3 pt-3 border-t border-gray-700">
-                             <h4 className="font-semibold text-sm text-gray-400">Fontes:</h4>
-                             <ul className="list-disc list-inside text-sm">
-                                 {result.sources.map((source, index) => (
-                                     <li key={index}>
-                                         <a href={source.web?.uri || source.maps?.uri} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">
-                                             {source.web?.title || source.maps?.title || 'Link'}
-                                         </a>
-                                     </li>
-                                 ))}
-                             </ul>
-                         </div>
-                     )}
-                 </div>
-             )}
-         </div>
+        <div className="w-full max-w-2xl bg-gray-800 p-6 rounded-lg shadow-lg mt-4">
+            <h3 className="text-lg font-semibold text-cyan-400 mb-3">Pesquisa Inteligente</h3>
+            <form onSubmit={handleSearch} className="flex gap-2">
+                <input
+                    type="text"
+                    value={query}
+                    onChange={e => setQuery(e.target.value)}
+                    placeholder="Pergunte sobre lugares, notícias, etc."
+                    className="flex-grow bg-gray-700 border-gray-600 rounded-md py-2 px-3 text-white"
+                />
+                <button type="submit" disabled={isLoading} className="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-2 px-4 rounded-md disabled:opacity-50">
+                    {isLoading ? 'Buscando...' : 'Perguntar'}
+                </button>
+            </form>
+            {result && (
+                <div className="mt-4 text-gray-300">
+                    <p className="whitespace-pre-wrap">{result.text}</p>
+                    {result.sources.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-gray-700">
+                            <h4 className="font-semibold text-sm text-gray-400">Fontes:</h4>
+                            <ul className="list-disc list-inside text-sm">
+                                {result.sources.map((source, index) => (
+                                    <li key={index}>
+                                        <a href={source.web?.uri || source.maps?.uri} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">
+                                            {source.web?.title || source.maps?.title || 'Link'}
+                                        </a>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
     );
 }
 
