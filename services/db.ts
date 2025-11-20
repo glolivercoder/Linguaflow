@@ -14,10 +14,10 @@ export interface ImageOverride {
 }
 
 interface SettingsRecord extends Settings {
-  id: number;
+    id: number;
 }
 
-interface AnkiDeckRecord extends AnkiDeckSummary { }
+interface AnkiDeckRecord extends AnkiDeckSummary {}
 
 export interface CategoryTranslationRecord {
   language: LanguageCode;
@@ -83,44 +83,6 @@ db.version(6).stores({
   categoryPhonetics: 'key',
 });
 
-// Version 7: Add image cache for local storage
-export interface ImageCacheRecord {
-  cardId: string;
-  imageBlob: Blob;
-  originalUrl: string;
-  cachedAt: number;
-}
-
-db.version(7).stores({
-  settings: 'id',
-  flashcards: 'id, sourceType, ankiDeckId',
-  phonetics: 'cardId',
-  imageOverrides: 'cardId',
-  ankiDecks: 'id, importedAt',
-  categoryTranslations: 'language',
-  categoryPhonetics: 'key',
-  imageCache: 'cardId, cachedAt',
-});
-
-// Version 8: Add conversaCache for Conversa sidebar translations and phonetics
-export interface ConversaCacheRecord {
-  cacheKey: string;      // Unique key: "targetLang::text" for translations, "phonetic::text" for phonetics
-  cachedValue: string;   // The translated text or phonetic transcription
-  cachedAt: number;      // Timestamp
-}
-
-db.version(8).stores({
-  settings: 'id',
-  flashcards: 'id, sourceType, ankiDeckId',
-  phonetics: 'cardId',
-  imageOverrides: 'cardId',
-  ankiDecks: 'id, importedAt',
-  categoryTranslations: 'language',
-  categoryPhonetics: 'key',
-  imageCache: 'cardId, cachedAt',
-  conversaCache: 'cacheKey, cachedAt',
-});
-
 const settingsTable: Table<SettingsRecord, number> = db.table('settings');
 const flashcardsTable: Table<Flashcard, string> = db.table('flashcards');
 const phoneticsTable: Table<PhoneticCache, string> = db.table('phonetics');
@@ -135,13 +97,12 @@ export interface CategoryPhoneticRecord {
   updatedAt: string;
 }
 const categoryPhoneticsTable: Table<CategoryPhoneticRecord, string> = db.table('categoryPhonetics');
-const imageCacheTable: Table<ImageCacheRecord, string> = db.table('imageCache');
 
 
 // --- Settings ---
 export const getSettings = async (): Promise<Settings> => {
   const settingsRecord = await settingsTable.get(1);
-
+  
   const cleanedRecord: Partial<Settings> = {};
   if (settingsRecord) {
     for (const key in DEFAULT_SETTINGS) {
@@ -179,7 +140,7 @@ export const addFlashcard = async (card: Flashcard): Promise<void> => {
 };
 
 export const bulkAddFlashcards = async (cards: Flashcard[]): Promise<void> => {
-  await flashcardsTable.bulkAdd(cards);
+    await flashcardsTable.bulkAdd(cards);
 };
 
 export const updateFlashcardImage = async (cardId: string, imageUrl: string): Promise<void> => {
@@ -382,67 +343,5 @@ export const importDatabaseSnapshot = async (snapshot: DatabaseSnapshot): Promis
         await categoryPhoneticsTable.bulkPut(snapshot.categoryPhonetics);
       }
     }
-  )
+  );
 };
-
-// --- Image Cache ---
-export const saveImageToCache = async (
-  cardId: string,
-  imageBlob: Blob,
-  originalUrl: string
-): Promise<void> => {
-  await imageCacheTable.put({
-    cardId,
-    imageBlob,
-    originalUrl,
-    cachedAt: Date.now(),
-  });
-};
-
-export const getImageFromCache = async (cardId: string): Promise<string | null> => {
-  const cached = await imageCacheTable.get(cardId);
-  if (!cached) return null;
-
-  // Convert blob to object URL
-  return URL.createObjectURL(cached.imageBlob);
-};
-
-export const isImageCached = async (cardId: string): Promise<boolean> => {
-  const cached = await imageCacheTable.get(cardId);
-  return !!cached;
-};
-
-export const clearImageCache = async (): Promise<void> => {
-  await imageCacheTable.clear();
-};
-
-export const getAllCachedImages = async (): Promise<ImageCacheRecord[]> => {
-  return imageCacheTable.toArray();
-};
-
-// Conversa Cache functions
-const conversaCacheTable: Table<ConversaCacheRecord, string> = db.table('conversaCache');
-
-export const saveToConversaCache = async (cacheKey: string, cachedValue: string): Promise<void> => {
-  await conversaCacheTable.put({
-    cacheKey,
-    cachedValue,
-    cachedAt: Date.now(),
-  });
-};
-
-export const getFromConversaCache = async (cacheKey: string): Promise<string | null> => {
-  const cached = await conversaCacheTable.get(cacheKey);
-  return cached ? cached.cachedValue : null;
-};
-
-export const clearConversaCache = async (): Promise<void> => {
-  await conversaCacheTable.clear();
-};
-
-export const getConversaCacheStats = async (): Promise<{ count: number; size: number }> => {
-  const allRecords = await conversaCacheTable.toArray();
-  const size = allRecords.reduce((acc, record) => acc + record.cachedValue.length, 0);
-  return { count: allRecords.length, size };
-};
-

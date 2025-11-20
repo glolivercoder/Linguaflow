@@ -52,55 +52,45 @@ export interface VoiceModelInfo {
 }
 
 export interface RawCard {
-  id: string;
-  texts: MultilingualText;
-  phoneticTexts?: MultilingualText; // Predefined phonetics for each language
-  imageUrl?: string; // Add imageUrl to raw card data
+    id: string;
+    texts: MultilingualText;
+    imageUrl?: string; // Add imageUrl to raw card data
 }
 
 export interface RawCategory {
-  [categoryName: string]: RawCard[];
+    [categoryName: string]: RawCard[];
 }
 
 // FIX: Corrected typo 'Raw-Category' to 'RawCategory'. A hyphen is not allowed in a type name and was causing parsing errors.
 export interface RawFlashcardData {
-  phrases: RawCategory;
-  objects: RawCategory;
+    phrases: RawCategory;
+    objects: RawCategory;
 }
 
 export interface OpenRouterModelSummary {
-  id: string;
-  name?: string;
-  description?: string;
-  context_length?: number;
-  pricing?: Record<string, unknown> | null;
-  tags?: string[] | null;
+    id: string;
+    name?: string;
+    description?: string;
+    context_length?: number;
+    pricing?: Record<string, unknown> | null;
+    tags?: string[] | null;
 }
 
 // --- Types for Anki Importer ---
 export interface AnkiCard {
-  id: number;
-  front: string;
-  back: string;
-  image?: string;
-  audio?: string;
-  tags: string[];
-  deckId?: string;
-  deckName?: string;
+    id: number;
+    front: string;
+    back: string;
+    image?: string;
+    audio?: string;
+    tags: string[];
+    deckId?: string;
+    deckName?: string;
 }
 
 export interface AnkiDeckSummary {
-  id: string;
-  name: string;
-  cardCount: number;
-  importedAt: number;
-}
-
-// --- Types for Anki Converter ---
-export interface ConversionConfig {
-  nativeLanguage: LanguageCode;
-  learningLanguage: LanguageCode;
-  usePixabayForImages: boolean;
-  enableOCR: boolean;
-  generatePhonetics: boolean;
+    id: string;
+    name: string;
+    cardCount: number;
+    importedAt: number;
 }
