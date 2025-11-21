@@ -479,3 +479,33 @@ export const getCustomCategories = async (type: 'phrases' | 'objects'): Promise<
   return customCategoriesTable.where('type').equals(type).sortBy('createdAt');
 };
 
+export const getCustomCategoryByName = async (
+  type: 'phrases' | 'objects',
+  name: string
+): Promise<CustomCategory | undefined> => {
+  const list = await customCategoriesTable.where('type').equals(type).toArray();
+  return list.find(c => c.name === name);
+};
+
+export const appendCardsToCustomCategory = async (
+  type: 'phrases' | 'objects',
+  name: string,
+  cards: RawCard[],
+): Promise<void> => {
+  const existing = await getCustomCategoryByName(type, name);
+  if (!existing) {
+    const category: CustomCategory = {
+      id: `custom-cat-${Date.now()}`,
+      type,
+      name,
+      cards,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await customCategoriesTable.put(category);
+    return;
+  }
+  const merged = { ...existing, cards: [...existing.cards, ...cards], updatedAt: new Date().toISOString() };
+  await customCategoriesTable.put(merged);
+};
+

@@ -263,7 +263,11 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
     for (const cat of customList) {
       customRecord[cat.name] = cat.cards.map(rawCardToFlashcard);
     }
-    return { ...predefined, ...customRecord };
+    const merged: Record<string, Flashcard[]> = { ...predefined };
+    for (const name of Object.keys(customRecord)) {
+      merged[name] = merged[name] ? [...merged[name], ...customRecord[name]] : customRecord[name];
+    }
+    return merged;
   }, [categorizedFlashcards, activeTab, customCategories, rawCardToFlashcard]);
 
   const customCategoryNames = React.useMemo(() => {
@@ -412,6 +416,52 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
   const nextCard = () => cards.length > 0 && setCurrentIndex((prev) => (prev + 1) % cards.length);
   const prevCard = () => cards.length > 0 && setCurrentIndex((prev) => (prev - 1 + cards.length) % cards.length);
 
+  const [isAddItemsOpen, setIsAddItemsOpen] = useState(false);
+  const [addTargetCategory, setAddTargetCategory] = useState<string | null>(null);
+  const [addItemCount, setAddItemCount] = useState(10);
+  const [addGenerated, setAddGenerated] = useState<RawCard[]>([]);
+  const [addGenerating, setAddGenerating] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+
+  const openAddItemsModal = (categoryName: string) => {
+    setAddTargetCategory(categoryName);
+    setAddGenerated([]);
+    setAddError(null);
+    setIsAddItemsOpen(true);
+  };
+
+  const handleGenerateItems = async () => {
+    if (!addTargetCategory) return;
+    setAddError(null);
+    setAddGenerating(true);
+    try {
+      const cards = await (await import('../services/categoryGeneratorService')).generateCategory({
+        theme: addTargetCategory,
+        type: activeTab,
+        itemCount: addItemCount,
+        nativeLanguage: settings.nativeLanguage,
+        targetLanguage: settings.learningLanguage,
+      });
+      setAddGenerated(cards);
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : 'Falha ao gerar itens');
+    } finally {
+      setAddGenerating(false);
+    }
+  };
+
+  const handleSaveItems = async () => {
+    if (!addTargetCategory || addGenerated.length === 0) return;
+    try {
+      await db.appendCardsToCustomCategory(activeTab, addTargetCategory, addGenerated);
+      const updated = await db.getCustomCategories(activeTab);
+      setCustomCategories(prev => ({ ...prev, [activeTab]: updated }));
+      setIsAddItemsOpen(false);
+    } catch (e) {
+      setAddError('Erro ao salvar itens');
+    }
+  };
+
   return (
     <div className="p-4 md:p-6 h-full flex flex-col animate-fade-in">
        {pickingImageForCard && (
@@ -446,16 +496,27 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
           <ul className="space-y-2">
             {categories.length > 0 ? categories.map(cat => (
               <li key={cat}>
-                <button
-                  onClick={() => { setSelectedCategory(cat); setCurrentIndex(0); }}
-                  className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${selectedCategory === cat 
-                    ? 'bg-cyan-600 text-white font-bold' 
-                    : customCategoryNames.has(cat) 
-                      ? 'bg-yellow-300/15 hover:bg-yellow-300/25 text-yellow-200' 
-                      : 'hover:bg-gray-700'}`}
+                <div className={`flex items-center justify-between px-3 py-2 rounded-md text-sm transition-colors ${selectedCategory === cat 
+                  ? 'bg-cyan-600 text-white font-bold' 
+                  : customCategoryNames.has(cat) 
+                    ? 'bg-yellow-300/15 hover:bg-yellow-300/25 text-yellow-200' 
+                    : 'hover:bg-gray-700'}`}
                 >
-                  {cat}
-                </button>
+                  <button
+                    onClick={() => { setSelectedCategory(cat); setCurrentIndex(0); }}
+                    className="text-left flex-1"
+                  >
+                    {cat}
+                  </button>
+                  <button
+                    onClick={() => openAddItemsModal(cat)}
+                    title="Adicionar itens"
+                    aria-label={`Adicionar itens à categoria ${cat}`}
+                    className="ml-2 inline-flex items-center justify-center w-8 h-8 rounded-full bg-[#00FF00] hover:bg-[#00EE00] text-black ring-2 ring-[#00CC00] hover:ring-white"
+                  >
+                    <PlusCircleIcon className="w-4 h-4" />
+                  </button>
+                </div>
               </li>
             )) : <p className="text-sm text-gray-500">Nenhuma categoria encontrada.</p>}
           </ul>
@@ -529,6 +590,50 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
           }}
           onClose={() => setIsCustomManagerOpen(false)}
         />
+      )}
+
+      {isAddItemsOpen && addTargetCategory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+          <div className="w-full max-w-xl bg-gray-900 border border-gray-700 rounded-xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-green-400">Adicionar itens em "{addTargetCategory}"</h2>
+              <button onClick={() => setIsAddItemsOpen(false)} className="text-gray-400 hover:text-gray-200" title="Fechar">
+                <PlusCircleIcon className="w-5 h-5 rotate-45" />
+              </button>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-300 mb-2">Quantidade: {addItemCount}</label>
+              <input type="range" min={5} max={20} value={addItemCount} onChange={(e) => setAddItemCount(parseInt(e.target.value))} className="w-full" />
+            </div>
+            {addError && <div className="text-red-300 text-sm">{addError}</div>}
+            {addGenerated.length === 0 ? (
+              <div className="flex gap-3">
+                <button onClick={handleGenerateItems} disabled={addGenerating} className="flex-1 px-4 py-2 bg-[#00FF00] hover:bg-[#00EE00] text-black rounded-md font-semibold">
+                  {addGenerating ? 'Gerando...' : 'Gerar com IA'}
+                </button>
+                <button onClick={() => setIsAddItemsOpen(false)} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-md">Cancelar</button>
+              </div>
+            ) : (
+              <>
+                <div className="max-h-48 overflow-y-auto space-y-2 bg-gray-800 rounded-md p-3 text-sm">
+                  {addGenerated.map((c, i) => (
+                    <div key={c.id} className="flex gap-2">
+                      <span className="text-gray-500 w-6">{i + 1}.</span>
+                      <div className="flex-1">
+                        <div className="text-white">{c.texts[settings.nativeLanguage]}</div>
+                        <div className="text-gray-400">{c.texts[settings.learningLanguage]}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-3">
+                  <button onClick={handleSaveItems} className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-500 rounded-md font-semibold">Adicionar à categoria</button>
+                  <button onClick={() => { setAddGenerated([]); }} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-md">Gerar novamente</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
