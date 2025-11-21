@@ -301,6 +301,53 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
           />
         </div>
 
+        {/* Auto-Backup Status Panel */}
+        <div className="p-4 bg-gray-800 rounded-lg space-y-3 border-l-4 border-green-500">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-200 flex items-center gap-2">
+              <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Backup Automático
+            </h3>
+            <p className="text-xs text-gray-400 mt-1">
+              Sistema de backup automático monitora todas as alterações e salva automaticamente seus dados a cada 5 minutos.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-gray-900/60 p-3 rounded border border-gray-700">
+              <div className="text-xs text-gray-400">Último Backup</div>
+              <div className="text-sm text-green-400 font-mono mt-1" id="last-backup-time">
+                Carregando...
+              </div>
+            </div>
+            <div className="bg-gray-900/60 p-3 rounded border border-gray-700">
+              <div className="text-xs text-gray-400">Status</div>
+              <div className="text-sm text-cyan-400 font-semibold mt-1" id="backup-status">
+                Ativo ✓
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={() => {
+              import('../services/autoBackupService').then(({ performManualBackup }) => {
+                performManualBackup();
+                alert('Backup manual iniciado! O arquivo será baixado em instantes.');
+              });
+            }}
+            className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-md transition-colors"
+          >
+            🔄 Forçar Backup Manual Agora
+          </button>
+
+          <div className="text-xs text-gray-500">
+            <strong>Arquivos salvos:</strong> Backup_linguaflow_data_YYYY-MM-DD-HH-MM-SS.json<br />
+            <strong>Inclui:</strong> Flashcards, Categorias, Traduções, Fonética, Configurações e Progresso das Lições
+          </div>
+        </div>
+
         <div className="p-4 bg-gray-800 rounded-lg space-y-3">
           <div>
             <h3 className="text-lg font-semibold text-gray-200">Pré-processamento de conteúdo</h3>
@@ -445,8 +492,8 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
                             })
                           }
                           className={`w-full text-left rounded-md border px-3 py-2 transition-colors ${settings.openRouterModelId === model.id
-                              ? 'border-cyan-500 bg-cyan-900/30 text-cyan-100'
-                              : 'border-gray-700 bg-gray-900/40 text-gray-200 hover:border-cyan-600 hover:bg-gray-900'
+                            ? 'border-cyan-500 bg-cyan-900/30 text-cyan-100'
+                            : 'border-gray-700 bg-gray-900/40 text-gray-200 hover:border-cyan-600 hover:bg-gray-900'
                             }`}
                         >
                           <div className="flex items-center justify-between gap-2">
@@ -529,8 +576,8 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
                 key={gender}
                 onClick={() => onSettingsChange({ ...settings, voiceGender: gender })}
                 className={`px-4 py-2 rounded-md transition-colors ${settings.voiceGender === gender
-                    ? 'bg-cyan-600 text-white font-semibold'
-                    : 'bg-gray-700 hover:bg-gray-600'
+                  ? 'bg-cyan-600 text-white font-semibold'
+                  : 'bg-gray-700 hover:bg-gray-600'
                   }`}
               >
                 {gender === 'female' ? 'Feminina' : gender === 'male' ? 'Masculina' : 'Neutra'}

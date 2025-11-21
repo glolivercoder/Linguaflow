@@ -17,6 +17,7 @@ import { CATEGORY_DEFINITIONS, CATEGORY_KEYS, BASE_CATEGORY_LANGUAGE_NAME, type 
 import { saveCategoryTranslations, getCategoryTranslations, getCategoryPhonetic, saveCategoryPhonetic } from './services/db';
 import { ImageOverride } from './services/db';
 import { downloadPixabayLogs, clearPixabayLogs, addPixabayLog, getPixabayLogs } from './services/pixabayLogger';
+import { triggerBackupOnFlashcardAdd, triggerBackupOnSettingsChange, triggerBackupOnTranslationCache } from './services/autoBackupService';
 
 type CategorizedFlashcards = Record<'phrases' | 'objects', Record<string, Flashcard[]>>;
 
@@ -317,6 +318,7 @@ const App: React.FC = () => {
   const handleSettingsChange = (newSettings: Settings) => {
     setSettings(newSettings);
     db.saveSettings(newSettings);
+    triggerBackupOnSettingsChange(); // Auto-backup trigger
   };
 
   const handleExportData = async () => {
@@ -372,6 +374,7 @@ const App: React.FC = () => {
     const newCard: Flashcard = { ...newCardData, id: new Date().toISOString(), sourceType: 'manual' };
     db.addFlashcard(newCard).then(() => {
       setUserFlashcards(prev => [...prev, newCard]);
+      triggerBackupOnFlashcardAdd(); // Auto-backup trigger
     });
   }, []);
 

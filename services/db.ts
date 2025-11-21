@@ -285,6 +285,10 @@ export const saveCategoryTranslations = async (
     categories,
     updatedAt: new Date().toISOString(),
   });
+  // Trigger auto-backup when translations are cached
+  import('./autoBackupService').then(({ triggerBackupOnTranslationCache }) => {
+    triggerBackupOnTranslationCache();
+  }).catch(() => {/* ignore */ });
 };
 
 export const getAllCategoryTranslationRecords = async (): Promise<CategoryTranslationRecord[]> => {
@@ -310,6 +314,10 @@ export const saveCategoryPhonetic = async (
     nativeLanguage: native,
     updatedAt: new Date().toISOString(),
   });
+  // Trigger auto-backup when phonetics are cached
+  import('./autoBackupService').then(({ triggerBackupOnTranslationCache }) => {
+    triggerBackupOnTranslationCache();
+  }).catch(() => {/* ignore */ });
 };
 
 export const getCategoryPhonetic = async (

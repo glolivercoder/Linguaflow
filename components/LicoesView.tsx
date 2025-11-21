@@ -141,16 +141,16 @@ const calculateVocabularyScore = (text: string): number => {
   const words = text.trim().split(/\s+/);
   const uniqueWords = new Set(words.map(w => w.toLowerCase()));
   const vocabularyRichness = words.length > 0 ? (uniqueWords.size / words.length) : 0;
-  
+
   const advancedWords = words.filter(word => word.length > 6).length;
   const advancedRatio = words.length > 0 ? (advancedWords / words.length) : 0;
-  
+
   return Math.min(100, (vocabularyRichness * 50) + (advancedRatio * 50));
 };
 
 const calculateGrammarScore = (text: string): number => {
   let score = 100;
-  
+
   const sentences = text.split(/[.!?]+/).filter(s => s.trim());
   sentences.forEach(sentence => {
     const trimmed = sentence.trim();
@@ -158,12 +158,12 @@ const calculateGrammarScore = (text: string): number => {
       score -= 5;
     }
   });
-  
+
   const hasPunctuation = /[.!?]$/.test(text.trim());
   if (!hasPunctuation && text.trim().length > 20) {
     score -= 10;
   }
-  
+
   return Math.max(0, score);
 };
 
@@ -182,6 +182,10 @@ const loadProgressFromStorage = <T,>(key: string, defaultValue: T): T => {
 const saveProgressToStorage = <T,>(key: string, data: T): void => {
   try {
     localStorage.setItem(key, JSON.stringify(data));
+    // Trigger auto-backup when lesson progress is saved
+    import('../services/autoBackupService').then(({ triggerBackupOnLessonProgress }) => {
+      triggerBackupOnLessonProgress();
+    });
   } catch (error) {
     console.error('Failed to save progress:', error);
   }
@@ -194,7 +198,7 @@ const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [dictionaryQuery, setDictionaryQuery] = useState('');
   const [activeDictionaryEntry, setActiveDictionaryEntry] = useState<DictionaryEntryWithMeta | null>(null);
-  const [quizProgress, setQuizProgress] = useState<Record<string, QuizProgressState>>(() => 
+  const [quizProgress, setQuizProgress] = useState<Record<string, QuizProgressState>>(() =>
     loadProgressFromStorage(STORAGE_KEY_QUIZ, {})
   );
   const [writingProgress, setWritingProgress] = useState<Record<string, WritingProgressState>>(() =>
@@ -286,7 +290,7 @@ const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
     const calculateMetrics = (text: string, isCorrect: boolean, keywordMatch: number = 100): WritingMetrics => {
       const targetWords = exercise.wordCountTarget ?? 20;
       const lengthScore = Math.min(100, (wordCount / targetWords) * 100);
-      
+
       return {
         accuracy: isCorrect ? 100 : 0,
         keywordCoverage: keywordMatch,
@@ -680,11 +684,11 @@ const LicoesView: React.FC<LicoesViewProps> = ({ settings, onBack }) => {
         : firstExactByWord
           ? firstExactByWord
           : {
-              term: rawTerm,
-              word: rawTerm,
-              translation: undefined,
-              examples: [],
-            };
+            term: rawTerm,
+            word: rawTerm,
+            translation: undefined,
+            examples: [],
+          };
 
       const cachedTranslation = dynamicTranslations[normalized];
       const initialTranslation = cachedTranslation ?? baseEntry.translation ?? 'Traduzindo...';
@@ -1008,8 +1012,8 @@ const StoriesSection: React.FC<StoriesSectionProps> = ({
                 key={lesson.id}
                 onClick={() => onSelectLesson(lesson.id)}
                 className={`w-full rounded-xl border p-4 text-left transition ${isActive
-                    ? 'border-cyan-500 bg-cyan-500/20 shadow-[0_0_20px_rgba(34,211,238,0.25)]'
-                    : 'border-gray-700 bg-gray-800 hover:border-cyan-500/60 hover:bg-gray-800/70'
+                  ? 'border-cyan-500 bg-cyan-500/20 shadow-[0_0_20px_rgba(34,211,238,0.25)]'
+                  : 'border-gray-700 bg-gray-800 hover:border-cyan-500/60 hover:bg-gray-800/70'
                   }`}
               >
                 <div className="flex items-center justify-between">
@@ -1154,9 +1158,8 @@ const ExpressionLink: React.FC<{
     <button
       type="button"
       onClick={onClick}
-      className={`whitespace-pre-wrap underline decoration-dotted underline-offset-4 transition hover:text-cyan-200 focus:text-cyan-200 focus:outline-none ${
-        expressionTypeColors[expression.type]
-      } px-1 py-0.5 rounded-md`}
+      className={`whitespace-pre-wrap underline decoration-dotted underline-offset-4 transition hover:text-cyan-200 focus:text-cyan-200 focus:outline-none ${expressionTypeColors[expression.type]
+        } px-1 py-0.5 rounded-md`}
     >
       {children}
     </button>
@@ -1319,11 +1322,10 @@ const TabButton: React.FC<{
 }> = ({ icon, label, isActive, onClick }) => (
   <button
     onClick={onClick}
-    className={`flex items-center space-x-2 rounded-lg px-4 py-2 text-sm font-medium transition ${
-      isActive
-        ? 'bg-cyan-600 text-white shadow-[0_0_15px_rgba(34,211,238,0.35)]'
-        : 'bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white'
-    }`}
+    className={`flex items-center space-x-2 rounded-lg px-4 py-2 text-sm font-medium transition ${isActive
+      ? 'bg-cyan-600 text-white shadow-[0_0_15px_rgba(34,211,238,0.35)]'
+      : 'bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white'
+      }`}
   >
     {icon}
     <span>{label}</span>
@@ -1382,8 +1384,8 @@ const InterpretationSection: React.FC<InterpretationSectionProps> = ({
                 key={`quiz-${lesson.id}`}
                 onClick={() => onSelectLesson(lesson.id)}
                 className={`w-full rounded-xl border p-4 text-left transition ${isActive
-                    ? 'border-purple-500 bg-purple-500/15 shadow-[0_0_20px_rgba(192,132,252,0.25)]'
-                    : 'border-gray-700 bg-gray-800 hover:border-purple-500/50 hover:bg-gray-800/70'
+                  ? 'border-purple-500 bg-purple-500/15 shadow-[0_0_20px_rgba(192,132,252,0.25)]'
+                  : 'border-gray-700 bg-gray-800 hover:border-purple-500/50 hover:bg-gray-800/70'
                   }`}
               >
                 <div className="flex items-center justify-between">
@@ -1459,10 +1461,10 @@ const InterpretationSection: React.FC<InterpretationSectionProps> = ({
               <article
                 key={question.id}
                 className={`rounded-xl border p-5 transition ${status === 'correct'
-                    ? 'border-emerald-500/40 bg-emerald-500/10'
-                    : status === 'incorrect'
-                      ? 'border-rose-500/40 bg-rose-500/10'
-                      : 'border-gray-700 bg-gray-800'
+                  ? 'border-emerald-500/40 bg-emerald-500/10'
+                  : status === 'incorrect'
+                    ? 'border-rose-500/40 bg-rose-500/10'
+                    : 'border-gray-700 bg-gray-800'
                   }`}
               >
                 <div className="mb-4 flex items-start gap-3">
@@ -1489,11 +1491,11 @@ const InterpretationSection: React.FC<InterpretationSectionProps> = ({
                         type="button"
                         onClick={() => onSelectAnswer(selectedLesson, questionIndex, optionIndex)}
                         className={`w-full rounded-lg border px-4 py-3 text-left transition ${isSelected
-                            ? 'border-purple-400 bg-purple-500/10 text-white'
-                            : 'border-gray-700 bg-gray-800 text-gray-200 hover:border-purple-400/40 hover:bg-gray-700'
+                          ? 'border-purple-400 bg-purple-500/10 text-white'
+                          : 'border-gray-700 bg-gray-800 text-gray-200 hover:border-purple-400/40 hover:bg-gray-700'
                           } ${isCorrectSelection ? 'border-emerald-500 bg-emerald-500/20 text-emerald-100'
                             : ''} ${isIncorrectSelection ? 'border-rose-500 bg-rose-500/20 text-rose-100'
-                            : ''}`}
+                              : ''}`}
                       >
                         <div className="flex items-center justify-between gap-4">
                           <span className="text-sm font-medium">{option}</span>
@@ -1580,8 +1582,8 @@ const WritingSection: React.FC<WritingSectionProps> = ({
                 key={`writing-${lesson.id}`}
                 onClick={() => onSelectLesson(lesson.id)}
                 className={`w-full rounded-xl border p-4 text-left transition ${isActive
-                    ? 'border-emerald-500 bg-emerald-500/15 shadow-[0_0_20px_rgba(16,185,129,0.25)]'
-                    : 'border-gray-700 bg-gray-800 hover:border-emerald-500/50 hover:bg-gray-800/70'
+                  ? 'border-emerald-500 bg-emerald-500/15 shadow-[0_0_20px_rgba(16,185,129,0.25)]'
+                  : 'border-gray-700 bg-gray-800 hover:border-emerald-500/50 hover:bg-gray-800/70'
                   }`}
               >
                 <div className="flex items-center justify-between">
@@ -1732,7 +1734,7 @@ const WritingSection: React.FC<WritingSectionProps> = ({
                         Pontuação: {score}/100
                       </span>
                     </div>
-                    
+
                     <p className="text-gray-300">{feedback}</p>
 
                     {score > 0 && (
@@ -1777,7 +1779,7 @@ const WritingSection: React.FC<WritingSectionProps> = ({
 
 const PronunciationSection: React.FC = () => {
   const [selectedPhraseIndex, setSelectedPhraseIndex] = useState(0);
-  
+
   // Sample pronunciation phrases
   const phrases = [
     { id: 'greeting', text: 'Hello everyone, let us break the ice with a quick game.' },
@@ -1786,7 +1788,7 @@ const PronunciationSection: React.FC = () => {
     { id: 'question', text: 'Have you ever tried learning a new language?' },
     { id: 'expression', text: 'That sounds like a lot of fun!' },
   ];
-  
+
   const currentPhrase = phrases[selectedPhraseIndex];
 
   return (
@@ -1802,11 +1804,10 @@ const PronunciationSection: React.FC = () => {
           <button
             key={phrase.id}
             onClick={() => setSelectedPhraseIndex(index)}
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
-              selectedPhraseIndex === index
-                ? 'bg-emerald-600 text-white'
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-            }`}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${selectedPhraseIndex === index
+              ? 'bg-emerald-600 text-white'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
           >
             Frase {index + 1}
           </button>

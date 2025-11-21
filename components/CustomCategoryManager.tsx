@@ -77,6 +77,10 @@ export const CustomCategoryManager: React.FC<CustomCategoryManagerProps> = ({
             await db.saveCustomCategory(category);
             onCategoryCreated(category);
             onClose();
+            // Trigger auto-backup when custom category is saved
+            import('../services/autoBackupService').then(({ triggerBackupOnCategoryChange }) => {
+                triggerBackupOnCategoryChange();
+            }).catch(() => {/* ignore */ });
         } catch (err) {
             setError('Erro ao salvar categoria');
         }
