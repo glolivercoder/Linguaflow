@@ -16,6 +16,7 @@ interface FlashcardsViewProps {
   settings: Settings;
   onBack: () => void;
   onImageChange: (cardId: string, newImageUrl: string) => void;
+  imageOverrides: { cardId: string; imageUrl: string }[]; // ADD: For custom category image overrides
 }
 
 const ImagePickerModal: React.FC<{
@@ -28,8 +29,10 @@ const ImagePickerModal: React.FC<{
 
   useEffect(() => {
     const fetchImages = async () => {
+      console.log('[ImagePickerModal] Starting to fetch images for:', card.translatedText);
       setIsLoading(true);
       const fetchedImages = await searchImages(card.translatedText);
+      console.log('[ImagePickerModal] Fetched', fetchedImages.length, 'images');
       setImages(fetchedImages);
       setIsLoading(false);
     };
@@ -52,7 +55,11 @@ const ImagePickerModal: React.FC<{
                 src={imgUrl}
                 alt={`Option ${index + 1} for ${card.translatedText}`}
                 className="w-full h-32 object-cover rounded-md cursor-pointer hover:ring-4 ring-cyan-500 transition-all"
-                onClick={() => onSelect(imgUrl)}
+                onClick={() => {
+                  console.log('[ImagePickerModal] Image selected:', imgUrl);
+                  onSelect(imgUrl);
+                  onClose(); // Close modal immediately after selection
+                }}
               />
             ))}
           </div>
@@ -73,7 +80,8 @@ export const FlashcardItem: React.FC<{
   settings: Settings;
   isObjectCard: boolean;
   onPickImage: (card: Flashcard) => void;
-}> = ({ card, settings, isObjectCard, onPickImage }) => {
+  onImageError?: (card: Flashcard) => void;
+}> = ({ card, settings, isObjectCard, onPickImage, onImageError }) => {
   const [isFlipped, setIsFlipped] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   // Estado de transcrição fonética desabilitado
@@ -164,11 +172,14 @@ export const FlashcardItem: React.FC<{
         alt={frontText}
         className="w-full h-48 object-cover rounded-t-xl flex-shrink-0"
         onLoad={() => console.log('[FlashcardItem] Image loaded successfully:', card.id)}
-        onError={(e) => console.error('[FlashcardItem] Image failed to load:', {
-          cardId: card.id,
-          imageUrl: displayImageUrl,
-          error: e
-        })}
+        onError={(e) => {
+          console.error('[FlashcardItem] Image failed to load:', {
+            cardId: card.id,
+            imageUrl: displayImageUrl,
+            error: e
+          });
+          onImageError?.(card);
+        }}
       />
     );
   };
@@ -185,7 +196,14 @@ export const FlashcardItem: React.FC<{
             {renderImage()}
             {isObjectCard && (
               <button
-                onClick={(e) => { e.stopPropagation(); onPickImage(card); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  console.log('[FlashcardItem] Camera icon clicked:', {
+                    cardId: card.id,
+                    frontText: card.originalText
+                  });
+                  onPickImage(card);
+                }}
                 className="absolute top-2 left-2 p-2 rounded-full bg-gray-800/50 hover:bg-cyan-600/80 transition-colors backdrop-blur-sm z-10"
                 aria-label="Change image"
               >
@@ -256,16 +274,53 @@ const SWEAR_CARDS = [
   { id: 'phr-swear-25', texts: { 'pt-BR': 'Insulto extremo', 'en-US': 'Cunt' }, phoneticTexts: { 'en-US': '/kʌnt/' } },
 ];
 
-const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, settings, onBack, onImageChange }) => {
+const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, settings, onBack, onImageChange, imageOverrides }) => {
   const [activeTab, setActiveTab] = useState<'phrases' | 'objects'>('phrases');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [pickingImageForCard, setPickingImageForCard] = useState<Flashcard | null>(null);
+  const [imageErrorNonce, setImageErrorNonce] = useState(0);
   const autoLoadedCardsRef = useRef<Set<string>>(new Set());
   const [isCustomManagerOpen, setIsCustomManagerOpen] = useState(false);
   const [customCategories, setCustomCategories] = useState<Record<'phrases' | 'objects', db.CustomCategory[]>>({ phrases: [], objects: [] });
+  const updateCustomCardImage = useCallback((cardId: string, imageUrl: string) => {
+    setCustomCategories(prev => {
+      const updateList = (list: db.CustomCategory[]) => {
+        let listChanged = false;
+        const updatedList = list.map(category => {
+          const hasCard = category.cards.some(card => card.id === cardId);
+          if (!hasCard) {
+            return category;
+          }
+          listChanged = true;
+          return {
+            ...category,
+            cards: category.cards.map(card =>
+              card.id === cardId ? { ...card, imageUrl } : card
+            )
+          };
+        });
+        return { listChanged, updatedList };
+      };
+
+      const { listChanged: phrasesChanged, updatedList: phrasesList } = updateList(prev.phrases);
+      const { listChanged: objectsChanged, updatedList: objectsList } = updateList(prev.objects);
+
+      if (!phrasesChanged && !objectsChanged) {
+        return prev;
+      }
+
+      return {
+        phrases: phrasesChanged ? phrasesList : prev.phrases,
+        objects: objectsChanged ? objectsList : prev.objects
+      };
+    });
+  }, []);
 
   const rawCardToFlashcard = useCallback((rawCard: RawCard): Flashcard => {
+    // Check for image override
+    const override = imageOverrides.find(o => o.cardId === rawCard.id);
+
     return {
       id: rawCard.id,
       originalText: rawCard.texts[settings.nativeLanguage] || '',
@@ -273,9 +328,9 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
       phoneticText: '',
       originalLang: settings.nativeLanguage,
       translatedLang: settings.learningLanguage,
-      imageUrl: rawCard.imageUrl,
+      imageUrl: override?.imageUrl || rawCard.imageUrl, // Use override if exists
     };
-  }, [settings.nativeLanguage, settings.learningLanguage]);
+  }, [settings.nativeLanguage, settings.learningLanguage, imageOverrides]);
 
   const allCategories = React.useMemo(() => {
     const predefined = categorizedFlashcards[activeTab] || {};
@@ -297,16 +352,24 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
 
   const categories = Object.keys(allCategories).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   const cards = (selectedCategory && allCategories[selectedCategory]) || [];
+  const currentCard = cards[currentIndex];
 
   useEffect(() => {
     const currentCategories = Object.keys(allCategories);
     if (currentCategories.length > 0 && !currentCategories.includes(selectedCategory || '')) {
       setSelectedCategory(currentCategories[0]);
+      setCurrentIndex(0); // Only reset when category doesn't exist
     } else if (currentCategories.length === 0) {
       setSelectedCategory(null);
+      setCurrentIndex(0); // Only reset when no categories
     }
+    // DON'T reset currentIndex here - it causes deck to restart on every allCategories change!
+  }, [activeTab, selectedCategory, allCategories]);
+
+  // Reset currentIndex ONLY when user explicitly changes category or tab
+  useEffect(() => {
     setCurrentIndex(0);
-  }, [activeTab, allCategories, selectedCategory]);
+  }, [activeTab, selectedCategory]);
 
   useEffect(() => {
     const loadCustomCategories = async () => {
@@ -346,70 +409,94 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
     replaceSwearCategory();
   }, [selectedCategory]);
 
-  // TEMPORARILY DISABLED: Auto-load was blocking navigation
-  // TODO: Implement on-demand autoload (only current card)
-  /*
   useEffect(() => {
-    if (activeTab !== 'objects' || cards.length === 0) {
+    if (activeTab !== 'objects' || !currentCard) {
       return;
     }
 
-    const loadImagesForCards = async () => {
-      console.log('[FlashcardsView] Starting auto-load for', cards.length, 'cards');
+    if (autoLoadedCardsRef.current.has(currentCard.id)) {
+      return;
+    }
 
-      for (const card of cards) {
-        if (autoLoadedCardsRef.current.has(card.id)) {
-          console.log('[FlashcardsView] Skipping already loaded card:', card.id);
-          continue;
+    const hasOverride = imageOverrides.some(o => o.cardId === currentCard.id);
+    const trimmedUrl = currentCard.imageUrl?.trim();
+    const needsImage = !hasOverride && (!trimmedUrl || trimmedUrl === 'pixabay:auto');
+
+    if (!needsImage) {
+      autoLoadedCardsRef.current.add(currentCard.id);
+      return;
+    }
+
+    const query = (currentCard.translatedText || currentCard.originalText || '').trim();
+    if (!query) {
+      return;
+    }
+
+    let canceled = false;
+
+    const autoLoadImage = async () => {
+      try {
+        const images = await searchImages(query);
+        if (!images || images.length === 0 || canceled) {
+          console.warn('[FlashcardsView] No images found for autoload', { cardId: currentCard.id, query });
+          return;
         }
-
-        autoLoadedCardsRef.current.add(card.id);
-
-        const needsPixabayImage = !card.imageUrl ||
-          (card.imageUrl &&
-            (card.imageUrl.includes('pixabay.com') ||
-              card.imageUrl.startsWith('http')));
-
-        if (needsPixabayImage && card.translatedText?.trim()) {
-          try {
-            console.log('[FlashcardsView] Fetching images for:', card.translatedText);
-            const images = await searchImages(card.translatedText);
-
-            if (images && images.length > 0) {
-              const imageUrl = images[0];
-              await new Promise((resolve, reject) => {
-                const img = new Image();
-                img.onload = resolve;
-                img.onerror = () => reject(new Error('Failed to load image'));
-                img.src = imageUrl;
-              });
-              await onImageChange(card.id, imageUrl);
-            }
-          } catch (error) {
-            console.error('[FlashcardsView] Failed to auto-assign image for card', {
-              cardId: card.id,
-              error: error instanceof Error ? error.message : String(error)
-            });
-          }
-        }
+        const imageUrl = images[0];
+        await onImageChange(currentCard.id, imageUrl);
+        updateCustomCardImage(currentCard.id, imageUrl);
+        autoLoadedCardsRef.current.add(currentCard.id);
+      } catch (error) {
+        console.error('[FlashcardsView] Failed to auto-load image for card', {
+          cardId: currentCard.id,
+          error: error instanceof Error ? error.message : String(error)
+        });
       }
-      console.log('[FlashcardsView] Auto-load completed');
     };
 
     const timer = setTimeout(() => {
-      loadImagesForCards().catch(error => {
-        console.error('[FlashcardsView] Error in loadImagesForCards:', error);
-      });
-    }, 2000);
+      autoLoadImage().catch(err => console.error('[FlashcardsView] Autoload error', err));
+    }, 600);
 
-    return () => clearTimeout(timer);
-  }, [activeTab, cards, onImageChange]);
-  */
+    return () => {
+      canceled = true;
+      clearTimeout(timer);
+    };
+  }, [activeTab, currentCard, imageOverrides, onImageChange, updateCustomCardImage, imageErrorNonce]);
+
+  const handleBrokenImage = useCallback((card: Flashcard) => {
+    const lowerUrl = card.imageUrl?.toLowerCase() || '';
+    const looksPixabay = lowerUrl.includes('pixabay.com');
+
+    if (!looksPixabay) {
+      return;
+    }
+
+    console.warn('[FlashcardsView] Broken Pixabay image detected. Resetting for autoload.', {
+      cardId: card.id,
+      imageUrl: card.imageUrl,
+    });
+
+    autoLoadedCardsRef.current.delete(card.id);
+    onImageChange(card.id, 'pixabay:auto');
+    updateCustomCardImage(card.id, 'pixabay:auto');
+    setImageErrorNonce(n => n + 1);
+  }, [onImageChange, updateCustomCardImage]);
 
   const handleImageSelect = (imageUrl: string) => {
+    console.log('[FlashcardsView] handleImageSelect called:', {
+      imageUrl,
+      cardId: pickingImageForCard?.id,
+      hasPickingCard: !!pickingImageForCard
+    });
+
     if (pickingImageForCard) {
+      console.log('[FlashcardsView] Calling onImageChange for card:', pickingImageForCard.id);
       onImageChange(pickingImageForCard.id, imageUrl);
+      updateCustomCardImage(pickingImageForCard.id, imageUrl);
       setPickingImageForCard(null);
+      console.log('[FlashcardsView] Image selection completed, modal should close');
+    } else {
+      console.warn('[FlashcardsView] No pickingImageForCard set!');
     }
   };
 
@@ -464,13 +551,22 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
 
   return (
     <div className="p-4 md:p-6 h-full flex flex-col animate-fade-in">
-      {pickingImageForCard && (
-        <ImagePickerModal
-          card={pickingImageForCard}
-          onSelect={handleImageSelect}
-          onClose={() => setPickingImageForCard(null)}
-        />
-      )}
+      {pickingImageForCard && (() => {
+        console.log('[FlashcardsView] Rendering ImagePickerModal for card:', {
+          cardId: pickingImageForCard.id,
+          translatedText: pickingImageForCard.translatedText
+        });
+        return (
+          <ImagePickerModal
+            card={pickingImageForCard}
+            onSelect={handleImageSelect}
+            onClose={() => {
+              console.log('[FlashcardsView] Modal closing via onClose');
+              setPickingImageForCard(null);
+            }}
+          />
+        );
+      })()}
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-cyan-400">Flashcards</h2>
       </div>
@@ -545,13 +641,13 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
             <div className="flex-grow flex flex-col items-center justify-center">
               <div className="w-full max-w-lg">
                 <FlashcardItem
-                  // FIX: Add a dynamic key to ensure the component re-mounts when the image URL changes.
-                  // This forces the new image to be displayed immediately after selection.
-                  key={cards[currentIndex].id + (cards[currentIndex].imageUrl || '')}
+                  // Use only card ID as key - imageUrl in key causes unnecessary re-mounts
+                  key={cards[currentIndex].id}
                   card={cards[currentIndex]}
                   settings={settings}
                   isObjectCard={activeTab === 'objects'}
                   onPickImage={setPickingImageForCard}
+                  onImageError={handleBrokenImage}
                 />
               </div>
               <div className="mt-6 flex items-center justify-center space-x-4">

@@ -1,4 +1,18 @@
 import * as db from './db';
+import { PROXY_BASE_URL } from './proxyClient';
+
+const isPixabayUrl = (url: string): boolean => {
+    try {
+        const parsed = new URL(url);
+        return parsed.hostname.endsWith('pixabay.com');
+    } catch {
+        return false;
+    }
+};
+
+const buildPixabayProxyUrl = (url: string): string => {
+    return `${PROXY_BASE_URL}/pixabay/image?url=${encodeURIComponent(url)}`;
+};
 
 /**
  * Downloads an image from a URL and caches it locally in IndexedDB
@@ -17,8 +31,10 @@ export const downloadAndCacheImage = async (
 
         console.log('[ImageCache] Downloading image from:', url);
 
+        const downloadUrl = isPixabayUrl(url) ? buildPixabayProxyUrl(url) : url;
+
         // Download image
-        const response = await fetch(url);
+        const response = await fetch(downloadUrl);
         if (!response.ok) {
             throw new Error(`Failed to fetch image: ${response.statusText}`);
         }

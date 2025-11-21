@@ -508,7 +508,7 @@ const App: React.FC = () => {
         return <ConversationView settings={settings} addFlashcard={addFlashcard} isAutoPreprocessing={isAutoPreprocessing} autoPreprocessStatus={autoPreprocessStatus} autoPreprocessProgress={autoPreprocessProgress} />;
       case 'flashcards':
         // FIX: Corrected typo in function name from 'handleImagechange' to 'handleImageChange'.
-        return <FlashcardsView categorizedFlashcards={categorizedFlashcards} settings={settings} onBack={() => setView('conversation')} onImageChange={handleImageChange} />;
+        return <FlashcardsView categorizedFlashcards={categorizedFlashcards} settings={settings} onBack={() => setView('conversation')} onImageChange={handleImageChange} imageOverrides={imageOverrides} />;
       case 'settings':
         return (
           <SettingsView
