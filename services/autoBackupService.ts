@@ -81,8 +81,10 @@ class AutoBackupService {
 
     /**
      * Perform the actual backup operation
+     * @param trigger - Reason for backup
+     * @param forceDownload - If true, triggers file download (manual backup only)
      */
-    async performBackup(trigger: string): Promise<void> {
+    async performBackup(trigger: string, forceDownload: boolean = false): Promise<void> {
         if (this.isBackingUp) {
             console.log('[AutoBackup] Backup already in progress, skipping');
             return;
@@ -95,14 +97,16 @@ class AutoBackupService {
             // Collect all data
             const backupData = await this.collectBackupData();
 
-            // Save to filesystem
-            await this.saveToFile(backupData);
-
-            // Also save to IndexedDB as a snapshot
+            // Save to IndexedDB/localStorage (always)
             await this.saveToIndexedDB(backupData);
 
+            // Only trigger file download if explicitly requested (manual backup)
+            if (forceDownload) {
+                await this.saveToFile(backupData);
+            }
+
             this.isDirty = false;
-            console.log('[AutoBackup] Backup completed successfully');
+            console.log('[AutoBackup] Backup completed successfully', forceDownload ? '(with download)' : '(internal only)');
 
         } catch (error) {
             console.error('[AutoBackup] Backup failed:', error);
@@ -291,10 +295,10 @@ class AutoBackupService {
     }
 
     /**
-     * Manually trigger backup
+     * Manually trigger backup with file download
      */
     async manualBackup(): Promise<void> {
-        await this.performBackup('Manual trigger');
+        await this.performBackup('Manual trigger', true); // Force download for manual backups
     }
 
     /**

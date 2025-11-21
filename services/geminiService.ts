@@ -16,12 +16,12 @@ export function decode(base64: string): Uint8Array {
 }
 
 export function encode(bytes: Uint8Array): string {
-    let binary = '';
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
 
 export async function decodeAudioData(
@@ -70,13 +70,38 @@ export const generateTTS = async (text: string, lang: LanguageCode, gender: Voic
 type PhoneticsResponse = { phonetics: string };
 
 export const getPhonetics = async (text: string, targetLangName: string, nativeLangName: string): Promise<string> => {
+  // Check cache first
+  const cacheKey = `phonetic::${targetLangName}::${nativeLangName}::${text}`;
+  try {
+    const { getFromConversaCache, saveToConversaCache } = await import('./db');
+    const cached = await getFromConversaCache(cacheKey);
+    if (cached) {
+      console.log('[Gemini] Phonetics cache hit:', { text, targetLangName, nativeLangName });
+      return cached;
+    }
+  } catch (error) {
+    console.warn('[Gemini] Cache check failed, proceeding with API:', error);
+  }
+
+  // Cache miss, call API
   try {
     const { phonetics } = await proxyPost<PhoneticsResponse>('/gemini/phonetics', {
       text,
       targetLangName,
       nativeLangName,
     });
-    return phonetics ?? 'Não foi possível gerar a fonética.';
+    const result = phonetics ?? 'Não foi possível gerar a fonética.';
+
+    // Save to cache
+    try {
+      const { saveToConversaCache } = await import('./db');
+      await saveToConversaCache(cacheKey, result);
+      console.log('[Gemini] Phonetics cached:', { text, targetLangName, nativeLangName });
+    } catch (cacheError) {
+      console.warn('[Gemini] Failed to cache phonetics:', cacheError);
+    }
+
+    return result;
   } catch (error) {
     console.error('Error generating phonetics via proxy:', error);
     return 'Não foi possível gerar a fonética.';
@@ -101,13 +126,38 @@ export const getIPA = async (text: string, langName: string): Promise<string> =>
 type TranslationResponse = { translation: string };
 
 export const translateText = async (text: string, fromLangName: string, toLangName: string): Promise<string> => {
+  // Check cache first
+  const cacheKey = `translation::${fromLangName}::${toLangName}::${text}`;
+  try {
+    const { getFromConversaCache, saveToConversaCache } = await import('./db');
+    const cached = await getFromConversaCache(cacheKey);
+    if (cached) {
+      console.log('[Gemini] Translation cache hit:', { text, fromLangName, toLangName });
+      return cached;
+    }
+  } catch (error) {
+    console.warn('[Gemini] Cache check failed, proceeding with API:', error);
+  }
+
+  // Cache miss, call API  
   try {
     const { translation } = await proxyPost<TranslationResponse>('/gemini/translate', {
       text,
       fromLangName,
       toLangName,
     });
-    return translation ?? 'Erro na tradução.';
+    const result = translation ?? 'Erro na tradução.';
+
+    // Save to cache
+    try {
+      const { saveToConversaCache } = await import('./db');
+      await saveToConversaCache(cacheKey, result);
+      console.log('[Gemini] Translation cached:', { text, fromLangName, toLangName });
+    } catch (cacheError) {
+      console.warn('[Gemini] Failed to cache translation:', cacheError);
+    }
+
+    return result;
   } catch (error) {
     console.error('Error translating text via proxy:', error);
     return 'Erro na tradução.';

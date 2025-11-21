@@ -59,8 +59,8 @@ const ImagePickerModal: React.FC<{
         ) : (
           <p className="text-center text-gray-500 h-48 flex items-center justify-center">Nenhuma imagem encontrada. Verifique sua chave da API do Pixabay.</p>
         )}
-         <button onClick={onClose} className="mt-6 px-4 py-2 bg-gray-600 rounded-md hover:bg-gray-500">
-            Cancelar
+        <button onClick={onClose} className="mt-6 px-4 py-2 bg-gray-600 rounded-md hover:bg-gray-500">
+          Cancelar
         </button>
       </div>
     </div>
@@ -84,10 +84,10 @@ export const FlashcardItem: React.FC<{
   useEffect(() => {
     // Reset state when card changes
     setIsFlipped(false);
-    console.log('[FlashcardItem] Card updated:', { 
-      cardId: card.id, 
+    console.log('[FlashcardItem] Card updated:', {
+      cardId: card.id,
       imageUrl: card.imageUrl,
-      originalText: card.originalText 
+      originalText: card.originalText
     });
   }, [card]);
 
@@ -124,7 +124,7 @@ export const FlashcardItem: React.FC<{
 
   const handleFlip = () => {
     const nextFlippedState = !isFlipped;
-    console.log('[FlashcardItem] Flipping card:', { 
+    console.log('[FlashcardItem] Flipping card:', {
       cardId: card.id,
       currentState: isFlipped ? 'back' : 'front',
       nextState: nextFlippedState ? 'back' : 'front',
@@ -151,23 +151,23 @@ export const FlashcardItem: React.FC<{
       console.log('[FlashcardItem] No imageUrl for card:', { cardId: card.id, frontText });
       return null;
     }
-    
-    console.log('[FlashcardItem] Rendering image:', { 
-      cardId: card.id, 
+
+    console.log('[FlashcardItem] Rendering image:', {
+      cardId: card.id,
       imageUrl: displayImageUrl,
-      frontText 
+      frontText
     });
-    
+
     return (
       <img
         src={displayImageUrl}
         alt={frontText}
         className="w-full h-48 object-cover rounded-t-xl flex-shrink-0"
         onLoad={() => console.log('[FlashcardItem] Image loaded successfully:', card.id)}
-        onError={(e) => console.error('[FlashcardItem] Image failed to load:', { 
-          cardId: card.id, 
+        onError={(e) => console.error('[FlashcardItem] Image failed to load:', {
+          cardId: card.id,
           imageUrl: displayImageUrl,
-          error: e 
+          error: e
         })}
       />
     );
@@ -346,6 +346,9 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
     replaceSwearCategory();
   }, [selectedCategory]);
 
+  // TEMPORARILY DISABLED: Auto-load was blocking navigation
+  // TODO: Implement on-demand autoload (only current card)
+  /*
   useEffect(() => {
     if (activeTab !== 'objects' || cards.length === 0) {
       return;
@@ -353,63 +356,39 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
 
     const loadImagesForCards = async () => {
       console.log('[FlashcardsView] Starting auto-load for', cards.length, 'cards');
-      
+
       for (const card of cards) {
-        // Skip if already processed by auto-load (not manually changed)
         if (autoLoadedCardsRef.current.has(card.id)) {
           console.log('[FlashcardsView] Skipping already loaded card:', card.id);
           continue;
         }
 
-        // Mark this card as processed, but don't block retries on errors
         autoLoadedCardsRef.current.add(card.id);
-        
-        // Try to load a new image if:
-        // 1. No image exists, OR
-        // 2. The image is from Pixabay (might be a placeholder), OR
-        // 3. The image is from any HTTP source (might be broken)
-        const needsPixabayImage = !card.imageUrl || 
-                                (card.imageUrl && 
-                                 (card.imageUrl.includes('pixabay.com') || 
-                                  card.imageUrl.startsWith('http')));
-        
-        console.log('[FlashcardsView] Card image check:', { 
-          cardId: card.id, 
-          hasImage: !!card.imageUrl, 
-          needsPixabayImage,
-          currentUrl: card.imageUrl 
-        });
-        
+
+        const needsPixabayImage = !card.imageUrl ||
+          (card.imageUrl &&
+            (card.imageUrl.includes('pixabay.com') ||
+              card.imageUrl.startsWith('http')));
+
         if (needsPixabayImage && card.translatedText?.trim()) {
           try {
             console.log('[FlashcardsView] Fetching images for:', card.translatedText);
             const images = await searchImages(card.translatedText);
-            console.log('[FlashcardsView] Received images:', images.length);
-            
+
             if (images && images.length > 0) {
               const imageUrl = images[0];
-              console.log('[FlashcardsView] Applying image to card:', { 
-                cardId: card.id,
-                imageUrl: imageUrl.substring(0, 50) + '...' 
-              });
-              
-              // Preload the image before setting it
               await new Promise((resolve, reject) => {
                 const img = new Image();
                 img.onload = resolve;
                 img.onerror = () => reject(new Error('Failed to load image'));
                 img.src = imageUrl;
               });
-              
               await onImageChange(card.id, imageUrl);
-            } else {
-              console.warn('[FlashcardsView] No images found for:', card.translatedText);
             }
           } catch (error) {
-            console.error('[FlashcardsView] Failed to auto-assign image for card', { 
-              cardId: card.id, 
-              error: error instanceof Error ? error.message : String(error),
-              stack: error instanceof Error ? error.stack : undefined
+            console.error('[FlashcardsView] Failed to auto-assign image for card', {
+              cardId: card.id,
+              error: error instanceof Error ? error.message : String(error)
             });
           }
         }
@@ -417,16 +396,16 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
       console.log('[FlashcardsView] Auto-load completed');
     };
 
-    // Add a small delay to ensure the component is fully mounted
     const timer = setTimeout(() => {
       loadImagesForCards().catch(error => {
         console.error('[FlashcardsView] Error in loadImagesForCards:', error);
       });
-    }, 500);
+    }, 2000);
 
     return () => clearTimeout(timer);
   }, [activeTab, cards, onImageChange]);
-  
+  */
+
   const handleImageSelect = (imageUrl: string) => {
     if (pickingImageForCard) {
       onImageChange(pickingImageForCard.id, imageUrl);
@@ -485,7 +464,7 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
 
   return (
     <div className="p-4 md:p-6 h-full flex flex-col animate-fade-in">
-       {pickingImageForCard && (
+      {pickingImageForCard && (
         <ImagePickerModal
           card={pickingImageForCard}
           onSelect={handleImageSelect}
@@ -517,10 +496,10 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
           <ul className="space-y-2">
             {categories.length > 0 ? categories.map(cat => (
               <li key={cat}>
-                <div className={`flex items-center justify-between px-3 py-2 rounded-md text-sm transition-colors ${selectedCategory === cat 
-                  ? 'bg-cyan-600 text-white font-bold' 
-                  : customCategoryNames.has(cat) 
-                    ? 'bg-yellow-300/15 hover:bg-yellow-300/25 text-yellow-200' 
+                <div className={`flex items-center justify-between px-3 py-2 rounded-md text-sm transition-colors ${selectedCategory === cat
+                  ? 'bg-cyan-600 text-white font-bold'
+                  : customCategoryNames.has(cat)
+                    ? 'bg-yellow-300/15 hover:bg-yellow-300/25 text-yellow-200'
                     : 'hover:bg-gray-700'}`}
                 >
                   <button
@@ -551,12 +530,12 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
             </div>
           )}
 
-           <div className="mt-6 p-3 bg-gray-800 rounded-lg">
-              <h4 className="font-semibold text-sm text-gray-300 mb-2">Importar Baralhos</h4>
-              <p className="text-xs text-gray-400">
-                Tem seus próprios baralhos? Use a aba 'Anki' para importar seus arquivos .apkg diretamente para o aplicativo.
-              </p>
-            </div>
+          <div className="mt-6 p-3 bg-gray-800 rounded-lg">
+            <h4 className="font-semibold text-sm text-gray-300 mb-2">Importar Baralhos</h4>
+            <p className="text-xs text-gray-400">
+              Tem seus próprios baralhos? Use a aba 'Anki' para importar seus arquivos .apkg diretamente para o aplicativo.
+            </p>
+          </div>
 
         </aside>
 

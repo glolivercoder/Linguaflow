@@ -27,7 +27,16 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
   const [generatedModel, setGeneratedModel] = useState<string | null>(null);
-  const backupFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [backupFileInputRef] = useState(() => { return { current: null as HTMLInputElement | null }; });
+  const [lastBackup, setLastBackup] = useState<string | null>(null);
+
+  // Load last backup time from localStorage
+  useEffect(() => {
+    const backup = localStorage.getItem('autoBackup_lastBackupTime');
+    if (backup) {
+      setLastBackup(backup);
+    }
+  }, []);
   const [openRouterModels, setOpenRouterModels] = useState<OpenRouterModelSummary[]>([]);
   const [isLoadingOpenRouter, setIsLoadingOpenRouter] = useState(false);
   const [openRouterError, setOpenRouterError] = useState<string | null>(null);
@@ -310,26 +319,24 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
               </svg>
               Backup Automático
             </h3>
-            <p className="text-xs text-gray-400 mt-1">
-              Sistema de backup automático monitora todas as alterações e salva automaticamente seus dados a cada 5 minutos.
+            <p className="mt-1 text-sm text-gray-400">
+              O sistema realiza backups automáticos sempre que você adiciona flashcards, altera configurações ou salva traduções/fonética.
             </p>
           </div>
-
           <div className="grid grid-cols-2 gap-3">
-            <div className="bg-gray-900/60 p-3 rounded border border-gray-700">
-              <div className="text-xs text-gray-400">Último Backup</div>
-              <div className="text-sm text-green-400 font-mono mt-1" id="last-backup-time">
-                Carregando...
-              </div>
+            <div className="p-3 bg-gray-750 rounded-md">
+              <p className="text-xs text-gray-400">Último Backup</p>
+              <p className="mt-1 text-sm font-medium text-gray-200">
+                {lastBackup ? new Date(lastBackup).toLocaleString('pt-BR') : 'Nunca'}
+              </p>
             </div>
-            <div className="bg-gray-900/60 p-3 rounded border border-gray-700">
-              <div className="text-xs text-gray-400">Status</div>
-              <div className="text-sm text-cyan-400 font-semibold mt-1" id="backup-status">
-                Ativo ✓
-              </div>
+            <div className="p-3 bg-gray-750 rounded-md">
+              <p className="text-xs text-gray-400">Status</p>
+              <p className="mt-1 text-sm font-medium text-green-400">
+                {lastBackup ? 'Ativo' : 'Pendente'}
+              </p>
             </div>
           </div>
-
           <button
             onClick={() => {
               import('../services/autoBackupService').then(({ performManualBackup }) => {
@@ -341,10 +348,85 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
           >
             🔄 Forçar Backup Manual Agora
           </button>
+          <div className="text-xs text-gray-500 bg-gray-750 p-2 rounded">
+            <strong>📁 Arquivo:</strong> Backup_linguaflow_data_HORARIO.json
+            <br />
+            <strong>📍 Local:</strong> Pasta de Downloads padrão do navegador
+          </div>
+        </div>
 
-          <div className="text-xs text-gray-500">
-            <strong>Arquivos salvos:</strong> Backup_linguaflow_data_YYYY-MM-DD-HH-MM-SS.json<br />
-            <strong>Inclui:</strong> Flashcards, Categorias, Traduções, Fonética, Configurações e Progresso das Lições
+        {/* Cache Statistics Panel */}
+        <div className="p-4 bg-gray-800 rounded-lg space-y-3 border-l-4 border-blue-500">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-200 flex items-center gap-2">
+              <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+              </svg>
+              Estatísticas de Cache
+            </h3>
+            <p className="mt-1 text-sm text-gray-400">
+              O cache armazena dados localmente para evitar chamadas repetidas às APIs e funcionar offline.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <div className="p-3 bg-gray-750 rounded-md">
+              <p className="text-xs text-gray-400">Imagens Pixabay</p>
+              <p className="mt-1 text-lg font-bold text-blue-400" id="cache-pixabay">...</p>
+            </div>
+            <div className="p-3 bg-gray-750 rounded-md">
+              <p className="text-xs text-gray-400">Traduções</p>
+              <p className="mt-1 text-lg font-bold text-green-400" id="cache-translations">...</p>
+            </div>
+            <div className="p-3 bg-gray-750 rounded-md">
+              <p className="text-xs text-gray-400">Fonética</p>
+              <p className="mt-1 text-lg font-bold text-purple-400" id="cache-phonetics">...</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="p-3 bg-gray-750 rounded-md">
+              <p className="text-xs text-gray-400">Cache Imagens (Blob)</p>
+              <p className="mt-1 text-lg font-bold text-yellow-400" id="cache-images">...</p>
+            </div>
+            <div className="p-3 bg-gray-750 rounded-md">
+              <p className="text-xs text-gray-400">Cache Conversa</p>
+              <p className="mt-1 text-lg font-bold text-pink-400" id="cache-conversa">...</p>
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={async () => {
+                const { getCacheStats } = await import('../services/db');
+                const stats = await getCacheStats();
+                document.getElementById('cache-pixabay')!.textContent = stats.pixabaySearches.toString();
+                document.getElementById('cache-translations')!.textContent = stats.translations.toString();
+                document.getElementById('cache-phonetics')!.textContent = stats.phonetics.toString();
+                document.getElementById('cache-images')!.textContent = stats.imageCache.toString();
+                document.getElementById('cache-conversa')!.textContent = stats.conversaCache.toString();
+              }}
+              className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-md transition-colors"
+            >
+              🔄 Atualizar Estatísticas
+            </button>
+            <button
+              onClick={async () => {
+                if (confirm('Deseja limpar cache antigo (> 30 dias)? Isso não afetará dados recentes.')) {
+                  const { clearOldPixabayCache } = await import('../services/db');
+                  const olderThan30days = 30 * 24 * 60 * 60 * 1000;
+                  const removed = await clearOldPixabayCache(olderThan30days);
+                  alert(`✅ ${removed} registros antigos foram removidos do cache Pixabay.`);
+                }
+              }}
+              className="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded-md transition-colors"
+            >
+              🗑️ Limpar Cache Antigo
+            </button>
+          </div>
+
+          <div className="text-xs text-gray-500 bg-gray-750 p-2 rounded">
+            <strong>💡 Dica:</strong> O cache funciona automaticamente. Dados são salvos em IndexedDB e funcionam mesmo offline!
           </div>
         </div>
 

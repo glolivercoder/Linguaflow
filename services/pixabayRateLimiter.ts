@@ -39,12 +39,13 @@ class PixabayRateLimiter {
      * Add a request to the queue
      */
     async queueRequest(query: string): Promise<string[]> {
-        // Check cache first
-        const cached = this.getFromCache(query);
+        // Check cache first (2-level: IndexedDB -> Memory)
+        const cached = await this.getFromCache(query);
         if (cached) {
             addPixabayLog('info', 'Returning cached Pixabay results', {
                 query,
-                cacheAge: Date.now() - cached.cachedAt
+                cacheAge: Date.now() - cached.cachedAt,
+                source: cached.source
             });
             return cached.urls;
         }
@@ -212,31 +213,76 @@ class PixabayRateLimiter {
 
     /**
      * Get cached result if available and not expired
+     * 2-level cache: checks IndexedDB first, then memory
      */
-    private getFromCache(query: string): CacheEntry | null {
+    private async getFromCache(query: string): Promise<{ urls: string[], cachedAt: number, source: string } | null> {
         const normalized = query.trim().toLowerCase();
-        const cached = this.cache.get(normalized);
 
-        if (!cached) return null;
-
-        const age = Date.now() - cached.cachedAt;
-        if (age > CACHE_DURATION_MS) {
+        // Level 1: Check memory cache first (fastest)
+        const memCached = this.cache.get(normalized);
+        if (memCached) {
+            const age = Date.now() - memCached.cachedAt;
+            if (age <= CACHE_DURATION_MS) {
+                return { ...memCached, source: 'memory' };
+            }
+            // Memory cache expired, remove it
             this.cache.delete(normalized);
-            return null;
         }
 
-        return cached;
+        // Level 2: Check IndexedDB cache
+        try {
+            const { getPixabaySearch } = await import('./db');
+            const urls = await getPixabaySearch(query);
+
+            if (urls && urls.length > 0) {
+                // Found in IndexedDB, load into memory cache for faster future access
+                const cacheEntry = {
+                    urls,
+                    cachedAt: Date.now()
+                };
+                this.cache.set(normalized, cacheEntry);
+
+                return { ...cacheEntry, source: 'indexeddb' };
+            }
+        } catch (error) {
+            addPixabayLog('warn', 'Error checking IndexedDB cache', {
+                query,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+
+        return null;
     }
 
     /**
      * Add result to cache
+     * Saves to both memory AND IndexedDB for persistence
      */
-    private addToCache(query: string, urls: string[]): void {
+    private async addToCache(query: string, urls: string[]): Promise<void> {
         const normalized = query.trim().toLowerCase();
-        this.cache.set(normalized, {
+        const cacheEntry = {
             urls,
             cachedAt: Date.now()
-        });
+        };
+
+        // Save to memory cache
+        this.cache.set(normalized, cacheEntry);
+
+        // Save to IndexedDB for persistence
+        try {
+            const { savePixabaySearch } = await import('./db');
+            await savePixabaySearch(query, urls);
+
+            addPixabayLog('info', 'Saved to persistent cache', {
+                query,
+                urlCount: urls.length
+            });
+        } catch (error) {
+            addPixabayLog('warn', 'Error saving to IndexedDB cache', {
+                query,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
 
         // Cleanup old cache entries periodically
         if (this.cache.size > 500) {

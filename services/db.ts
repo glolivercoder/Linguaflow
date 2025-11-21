@@ -144,6 +144,27 @@ db.version(9).stores({
   customCategories: 'id, type, name, createdAt',
 });
 
+// Version 10: Add pixabaySearchCache for persistent Pixabay search results
+export interface PixabaySearchCacheRecord {
+  query: string;        // Normalized search query (lowercase, trimmed) - PRIMARY KEY
+  urls: string[];       // Array of image URLs returned from Pixabay
+  cachedAt: number;     // Timestamp when cached
+}
+
+db.version(10).stores({
+  settings: 'id',
+  flashcards: 'id, sourceType, ankiDeckId',
+  phonetics: 'cardId',
+  imageOverrides: 'cardId',
+  ankiDecks: 'id, importedAt',
+  categoryTranslations: 'language',
+  categoryPhonetics: 'key',
+  imageCache: 'cardId, cachedAt',
+  conversaCache: 'cacheKey, cachedAt',
+  customCategories: 'id, type, name, createdAt',
+  pixabaySearchCache: 'query, cachedAt',
+});
+
 const settingsTable: Table<SettingsRecord, number> = db.table('settings');
 const flashcardsTable: Table<Flashcard, string> = db.table('flashcards');
 const phoneticsTable: Table<PhoneticCache, string> = db.table('phonetics');
@@ -160,6 +181,17 @@ export interface CategoryPhoneticRecord {
 const categoryPhoneticsTable: Table<CategoryPhoneticRecord, string> = db.table('categoryPhonetics');
 const imageCacheTable: Table<ImageCacheRecord, string> = db.table('imageCache');
 const customCategoriesTable: Table<CustomCategory, string> = db.table('customCategories');
+
+// Version 8: Add conversaCache table reference
+export interface ConversaCacheRecord {
+  cacheKey: string;      // Unique key: "targetLang::text" for translations, "phonetic::text" for phonetics
+  cachedValue: string;   // The translated text or phonetic transcription
+  cachedAt: number;      // Timestamp
+}
+const conversaCacheTable: Table<ConversaCacheRecord, string> = db.table('conversaCache');
+
+// Version 10: Add pixabaySearchCache table reference
+const pixabaySearchCacheTable: Table<PixabaySearchCacheRecord, string> = db.table('pixabaySearchCache');
 
 
 // --- Settings ---
@@ -452,9 +484,7 @@ export const getAllCachedImages = async (): Promise<ImageCacheRecord[]> => {
   return imageCacheTable.toArray();
 };
 
-// Conversa Cache functions
-const conversaCacheTable: Table<ConversaCacheRecord, string> = db.table('conversaCache');
-
+// --- ConversaCache (Translations and Phonetics from Conversa View) ---
 export const saveToConversaCache = async (cacheKey: string, cachedValue: string): Promise<void> => {
   await conversaCacheTable.put({
     cacheKey,
@@ -530,4 +560,82 @@ export const getCustomCategories = async (type: 'phrases' | 'objects'): Promise<
 
 export const saveCustomCategory = async (category: CustomCategory): Promise<void> => {
   await customCategoriesTable.put({ ...category, updatedAt: new Date().toISOString() });
+};
+
+// --- Pixabay Search Cache ---
+const PIXABAY_CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+export const savePixabaySearch = async (query: string, urls: string[]): Promise<void> => {
+  const normalized = query.trim().toLowerCase();
+  await pixabaySearchCacheTable.put({
+    query: normalized,
+    urls,
+    cachedAt: Date.now(),
+  });
+};
+
+export const getPixabaySearch = async (query: string): Promise<string[] | null> => {
+  const normalized = query.trim().toLowerCase();
+  const cached = await pixabaySearchCacheTable.get(normalized);
+
+  if (!cached) return null;
+
+  // Check if cache is expired (older than 24h)
+  const age = Date.now() - cached.cachedAt;
+  if (age > PIXABAY_CACHE_DURATION_MS) {
+    // Remove expired cache
+    await pixabaySearchCacheTable.delete(normalized);
+    return null;
+  }
+
+  return cached.urls;
+};
+
+export const getAllPixabaySearches = async (): Promise<PixabaySearchCacheRecord[]> => {
+  return pixabaySearchCacheTable.toArray();
+};
+
+export const clearOldPixabayCache = async (olderThanMs: number = PIXABAY_CACHE_DURATION_MS): Promise<number> => {
+  const now = Date.now();
+  const allRecords = await pixabaySearchCacheTable.toArray();
+  const oldKeys: string[] = [];
+
+  allRecords.forEach(record => {
+    if (now - record.cachedAt > olderThanMs) {
+      oldKeys.push(record.query);
+    }
+  });
+
+  if (oldKeys.length > 0) {
+    await pixabaySearchCacheTable.bulkDelete(oldKeys);
+  }
+
+  return oldKeys.length;
+};
+
+// --- Cache Statistics ---
+export interface CacheStats {
+  pixabaySearches: number;
+  translations: number;
+  phonetics: number;
+  imageCache: number;
+  conversaCache: number;
+}
+
+export const getCacheStats = async (): Promise<CacheStats> => {
+  const [pixabaySearches, translations, phonetics, imageCache, conversaCache] = await Promise.all([
+    pixabaySearchCacheTable.count(),
+    categoryTranslationsTable.count(),
+    categoryPhoneticsTable.count(),
+    imageCacheTable.count(),
+    conversaCacheTable.count(),
+  ]);
+
+  return {
+    pixabaySearches,
+    translations,
+    phonetics,
+    imageCache,
+    conversaCache,
+  };
 };
