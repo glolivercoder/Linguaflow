@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Flashcard, Settings, LanguageCode } from '../types';
+import { Flashcard, Settings, LanguageCode, RawCard } from '../types';
 // getIPA removido para desabilitar transcrição fonética
 import { searchImages } from '../services/pixabayService';
 import { SUPPORTED_LANGUAGES } from '../constants';
@@ -214,19 +214,61 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
   const [pickingImageForCard, setPickingImageForCard] = useState<Flashcard | null>(null);
   const autoLoadedCardsRef = useRef<Set<string>>(new Set());
   const [isCustomManagerOpen, setIsCustomManagerOpen] = useState(false);
+  const [customCategories, setCustomCategories] = useState<Record<'phrases' | 'objects', db.CustomCategory[]>>({ phrases: [], objects: [] });
 
-  const categories = Object.keys(categorizedFlashcards[activeTab] || {});
-  const cards = (selectedCategory && categorizedFlashcards[activeTab]?.[selectedCategory]) || [];
+  const rawCardToFlashcard = useCallback((rawCard: RawCard): Flashcard => {
+    return {
+      id: rawCard.id,
+      originalText: rawCard.texts[settings.nativeLanguage] || '',
+      translatedText: rawCard.texts[settings.learningLanguage] || '',
+      phoneticText: '',
+      originalLang: settings.nativeLanguage,
+      translatedLang: settings.learningLanguage,
+      imageUrl: rawCard.imageUrl,
+    };
+  }, [settings.nativeLanguage, settings.learningLanguage]);
+
+  const allCategories = React.useMemo(() => {
+    const predefined = categorizedFlashcards[activeTab] || {};
+    const customList = customCategories[activeTab] || [];
+    const customRecord: Record<string, Flashcard[]> = {};
+    for (const cat of customList) {
+      customRecord[cat.name] = cat.cards.map(rawCardToFlashcard);
+    }
+    return { ...predefined, ...customRecord };
+  }, [categorizedFlashcards, activeTab, customCategories, rawCardToFlashcard]);
+
+  const customCategoryNames = React.useMemo(() => {
+    return new Set((customCategories[activeTab] || []).map(c => c.name));
+  }, [customCategories, activeTab]);
+
+  const categories = Object.keys(allCategories).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  const cards = (selectedCategory && allCategories[selectedCategory]) || [];
 
   useEffect(() => {
-    const currentCategories = Object.keys(categorizedFlashcards[activeTab] || {});
+    const currentCategories = Object.keys(allCategories);
     if (currentCategories.length > 0 && !currentCategories.includes(selectedCategory || '')) {
       setSelectedCategory(currentCategories[0]);
     } else if (currentCategories.length === 0) {
       setSelectedCategory(null);
     }
     setCurrentIndex(0);
-  }, [activeTab, categorizedFlashcards, selectedCategory]);
+  }, [activeTab, allCategories, selectedCategory]);
+
+  useEffect(() => {
+    const loadCustomCategories = async () => {
+      try {
+        const [phrasesCategories, objectsCategories] = await Promise.all([
+          db.getCustomCategories('phrases'),
+          db.getCustomCategories('objects')
+        ]);
+        setCustomCategories({ phrases: phrasesCategories, objects: objectsCategories });
+      } catch (error) {
+        console.error('[FlashcardsView] Error loading custom categories:', error);
+      }
+    };
+    loadCustomCategories();
+  }, []);
 
   useEffect(() => {
     if (activeTab !== 'objects' || cards.length === 0) {
@@ -355,7 +397,11 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
               <li key={cat}>
                 <button
                   onClick={() => { setSelectedCategory(cat); setCurrentIndex(0); }}
-                  className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${selectedCategory === cat ? 'bg-cyan-600 text-white font-bold' : 'hover:bg-gray-700'}`}
+                  className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${selectedCategory === cat 
+                    ? 'bg-cyan-600 text-white font-bold' 
+                    : customCategoryNames.has(cat) 
+                      ? 'bg-yellow-300/15 hover:bg-yellow-300/25 text-yellow-200' 
+                      : 'hover:bg-gray-700'}`}
                 >
                   {cat}
                 </button>
@@ -420,8 +466,15 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
       {isCustomManagerOpen && (
         <CustomCategoryManager
           type={activeTab}
-          onCategoryCreated={() => {
-            setIsCustomManagerOpen(false);
+          onCategoryCreated={async (category) => {
+            try {
+              const updated = await db.getCustomCategories(activeTab);
+              setCustomCategories(prev => ({ ...prev, [activeTab]: updated }));
+              setSelectedCategory(category.name);
+              setCurrentIndex(0);
+            } finally {
+              setIsCustomManagerOpen(false);
+            }
           }}
           onClose={() => setIsCustomManagerOpen(false)}
         />
