@@ -3,10 +3,9 @@ import { Flashcard, Settings, LanguageCode } from '../types';
 // getIPA removido para desabilitar transcrição fonética
 import { searchImages } from '../services/pixabayService';
 import { SUPPORTED_LANGUAGES } from '../constants';
-import { SpeakerIcon, ImageIcon, PlusCircleIcon } from './icons';
+import { SpeakerIcon, ImageIcon } from './icons';
 import { playAudio as playLocalAudio } from '../services/ttsService';
 import * as db from '../services/db';
-import { CustomCategoryManager } from './CustomCategoryManager';
 
 type CategorizedFlashcards = Record<'phrases' | 'objects', Record<string, Flashcard[]>>;
 
@@ -213,7 +212,6 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [pickingImageForCard, setPickingImageForCard] = useState<Flashcard | null>(null);
   const autoLoadedCardsRef = useRef<Set<string>>(new Set());
-  const [isCustomManagerOpen, setIsCustomManagerOpen] = useState(false);
 
   const categories = Object.keys(categorizedFlashcards[activeTab] || {});
   const cards = (selectedCategory && categorizedFlashcards[activeTab]?.[selectedCategory]) || [];
@@ -340,16 +338,7 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
       <div className="flex-grow flex flex-col md:flex-row gap-6 overflow-y-auto">
         {/* Categories Sidebar */}
         <aside className="w-full md:w-1/4 lg:w-1/5 flex-shrink-0">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-lg font-semibold text-gray-400">Categorias</h3>
-            <button
-              onClick={() => setIsCustomManagerOpen(true)}
-              title="Nova categoria"
-              className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-cyan-600 hover:bg-cyan-700 text-white"
-            >
-              <PlusCircleIcon className="w-4 h-4 text-white" />
-            </button>
-          </div>
+          <h3 className="text-lg font-semibold text-gray-400 mb-3">Categorias</h3>
           <ul className="space-y-2">
             {categories.length > 0 ? categories.map(cat => (
               <li key={cat}>
@@ -416,16 +405,6 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
           Voltar
         </button>
       </div>
-
-      {isCustomManagerOpen && (
-        <CustomCategoryManager
-          type={activeTab}
-          onCategoryCreated={() => {
-            setIsCustomManagerOpen(false);
-          }}
-          onClose={() => setIsCustomManagerOpen(false)}
-        />
-      )}
     </div>
   );
 };

@@ -123,7 +123,7 @@ db.version(8).stores({
 
 // Version 9: Add customCategories for user-created flashcard categories
 export interface CustomCategory {
-  id: string;
+  id: string; // UUID
   type: 'phrases' | 'objects';
   name: string;
   cards: RawCard[];
@@ -464,12 +464,6 @@ export const clearConversaCache = async (): Promise<void> => {
   await conversaCacheTable.clear();
 };
 
-export const getConversaCacheStats = async (): Promise<{ count: number; size: number }> => {
-  const allRecords = await conversaCacheTable.toArray();
-  const size = allRecords.reduce((acc, record) => acc + record.cachedValue.length, 0);
-  return { count: allRecords.length, size };
-};
-
 // --- Custom Categories ---
 export const saveCustomCategory = async (category: CustomCategory): Promise<void> => {
   await customCategoriesTable.put(category);
@@ -479,3 +473,31 @@ export const getCustomCategories = async (type: 'phrases' | 'objects'): Promise<
   return customCategoriesTable.where('type').equals(type).sortBy('createdAt');
 };
 
+export const getAllCustomCategories = async (): Promise<CustomCategory[]> => {
+  return customCategoriesTable.toArray();
+};
+
+export const getCustomCategoryById = async (id: string): Promise<CustomCategory | undefined> => {
+  return customCategoriesTable.get(id);
+};
+
+export const deleteCustomCategory = async (id: string): Promise<void> => {
+  await customCategoriesTable.delete(id);
+};
+
+export const updateCustomCategory = async (id: string, updates: Partial<CustomCategory>): Promise<void> => {
+  const category = await customCategoriesTable.get(id);
+  if (category) {
+    await customCategoriesTable.put({
+      ...category,
+      ...updates,
+      updatedAt: new Date().toISOString()
+    });
+  }
+};
+
+export const getConversaCacheStats = async (): Promise<{ count: number; size: number }> => {
+  const allRecords = await conversaCacheTable.toArray();
+  const size = allRecords.reduce((acc, record) => acc + record.cachedValue.length, 0);
+  return { count: allRecords.length, size };
+};

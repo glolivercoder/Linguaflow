@@ -1,14 +1,24 @@
 import JSZip from 'jszip';
-import initSqlJs from 'sql.js/dist/sql-wasm.js';
+import initSqlJs from 'sql.js';
 import { AnkiCard } from '../types';
 
-// Helper function to strip HTML tags
-const stripHtml = (html: string) => {
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    return doc.body.textContent || "";
+// Vite will copy the wasm file to the public folder
+// In production and dev, it will be available at /sql-wasm.wasm
+const getSqlWasmUrl = () => {
+    return '/sql-wasm.wasm';
 };
 
-// Helper function to remove instructional boilerplate often bundled with shared decks
+// Helper function to strip HTML tags, preserving basic whitespace
+const stripHtml = (html: string) => {
+    // Replace block tags with newlines to preserve structure
+    const withNewlines = html
+        .replace(/<(br|div|p|h\d|li)[^>]*>/gi, '\n')
+        .replace(/&nbsp;/g, ' ');
+    const doc = new DOMParser().parseFromString(withNewlines, 'text/html');
+    return (doc.body.textContent || "").replace(/\n+/g, '\n').trim();
+};
+
+// Helper function to remove instructional boilerplate
 const removeInstructionalText = (text: string) => {
     if (!text) return text;
 
@@ -45,54 +55,63 @@ const removeInstructionalText = (text: string) => {
     return cleaned.trim();
 };
 
-// Helper function to extract all image sources from an HTML string
+// Helper function to extract all image sources from HTML
 const extractAllImageSrcs = (html: string): string[] => {
     const matches: string[] = [];
-    const regex = /<img[^>]+src="([^">]+)"/g;
+    // Improved regex: handles single/double/no quotes, case insensitive
+    const regex = /<img[^>]+src=["']?([^"'\s>]+)["']?[^>]*>/gi;
     let match;
     while ((match = regex.exec(html)) !== null) {
-        matches.push(match[1]);
+        // Decode URI component to handle %20 etc.
+        try {
+            matches.push(decodeURIComponent(match[1]));
+        } catch (e) {
+            matches.push(match[1]);
+        }
     }
     return matches;
 };
 
-// Helper function to extract all audio sources from an HTML string
+// Helper function to extract all audio sources from HTML
 const extractAllAudioSrcs = (html: string): string[] => {
     const matches: string[] = [];
-    // Match both <audio> tags and [sound:...] Anki format
-    const audioTagRegex = /<audio[^>]+src="([^">]+)"/g;
-    const soundRegex = /\[sound:([^\]]+)\]/g;
-    
+    // Match <audio> tags
+    const audioTagRegex = /<audio[^>]+src=["']?([^"'\s>]+)["']?[^>]*>/gi;
+    // Match [sound:...] Anki format
+    const soundRegex = /\[sound:([^\]]+)\]/gi;
+
     let match;
     while ((match = audioTagRegex.exec(html)) !== null) {
-        matches.push(match[1]);
+        try {
+            matches.push(decodeURIComponent(match[1]));
+        } catch (e) {
+            matches.push(match[1]);
+        }
     }
     while ((match = soundRegex.exec(html)) !== null) {
-        matches.push(match[1]);
+        try {
+            matches.push(decodeURIComponent(match[1]));
+        } catch (e) {
+            matches.push(match[1]);
+        }
     }
     return matches;
+};
+
+const stripAndClean = (html: string): string => removeInstructionalText(stripHtml(html || '')).trim();
+
+const isLikelyMetadata = (html: string): boolean => {
+    const cleaned = stripHtml(html).trim();
+    if (!cleaned) return true;
+    if (/^\d+$/.test(cleaned)) return true;
+    if (/^[A-Za-z0-9\-_]+$/.test(cleaned) && cleaned.length <= 4) return true;
+    return false;
 };
 
 const WORD_REGEX = /\b[A-Za-zÀ-ÖØ-öø-ÿ]+\b/g;
 const PORTUGUESE_ACCENTED_CHAR_REGEX = /[ãõáéíóúâêîôûç]/i;
 const PORTUGUESE_COMMON_WORDS_REGEX = /\b(de|que|é|para|com|não|nao|uma|um|os|as|eu|você|voce|ele|ela|isso|isto|está|esta|ser|ter|foi|são|sao)\b/i;
 const PORTUGUESE_SUFFIX_REGEX = /(ção|ções|são|sao|mente|dade|nhão|nhao|lhão|lhao)/i;
-
-const stripAndClean = (html: string): string => removeInstructionalText(stripHtml(html || '')).trim();
-
-const isLikelyMetadata = (html: string): boolean => {
-    const cleaned = stripHtml(html).trim();
-    if (!cleaned) {
-        return true;
-    }
-    if (/^\d+$/.test(cleaned)) {
-        return true;
-    }
-    if (/^[A-Za-z0-9\-_]+$/.test(cleaned) && cleaned.length <= 4) {
-        return true;
-    }
-    return false;
-};
 
 const scorePortugueseLikelihood = (text: string): number => {
     if (!text) return 0;
@@ -148,318 +167,131 @@ const pickBestField = (
     }
 
     candidates.sort((a, b) => b.score - a.score);
-    const { score: _score, ...best } = candidates[0];
-    return best;
+    return candidates[0];
 };
 
-// Helper function to determine MIME type from filename
-const getMimeType = (filename: string): string => {
-    const ext = filename.toLowerCase().split('.').pop();
-    const mimeTypes: Record<string, string> = {
-        'jpg': 'image/jpeg',
-        'jpeg': 'image/jpeg',
-        'png': 'image/png',
-        'gif': 'image/gif',
-        'webp': 'image/webp',
-        'svg': 'image/svg+xml',
-        'mp3': 'audio/mpeg',
-        'wav': 'audio/wav',
-        'ogg': 'audio/ogg',
-        'm4a': 'audio/mp4',
-        'flac': 'audio/flac'
-    };
-    return mimeTypes[ext || ''] || 'application/octet-stream';
-};
+/**
+ * Parse Anki .apkg file manually using JSZip and sql.js
+ * Supports audio, images, and large files (>10MB)
+ */
+export const parseAnkiDeck = async (file: File): Promise<AnkiCard[]> => {
+    console.log('[ankiParser] Starting to parse deck manually:', file.name);
 
-// Main parsing function
-export const parseAnkiPackage = async (
-    file: File,
-    onProgress: (progress: number, status: string) => void
-): Promise<AnkiCard[]> => {
-    onProgress(0, "Iniciando...");
-    
-    console.log('='.repeat(80));
-    console.log('🎴 [ANKI IMPORT] Starting Anki deck import');
-    console.log('='.repeat(80));
+    try {
+        const zip = new JSZip();
+        const zipContent = await zip.loadAsync(file);
 
-    // Initialize SQL.js
-    const SQL = await initSqlJs({
-        locateFile: () => '/sql-wasm.wasm'
-    });
-
-    onProgress(5, "Carregando arquivo .apkg");
-    const zip = await JSZip.loadAsync(file);
-
-    // Find and load the SQLite database from the zip
-    const dbFile = zip.file('collection.anki2') || zip.file('collection.anki21');
-    if (!dbFile) {
-        throw new Error("Arquivo de coleção 'collection.anki2' ou 'collection.anki21' não encontrado no .apkg.");
-    }
-
-    onProgress(15, "Lendo banco de dados");
-    const dbData = await dbFile.async('uint8array');
-    const db = new SQL.Database(dbData);
-
-    // Parse media manifest file
-    onProgress(25, "Analisando mídias");
-    const mediaFile = zip.file('media');
-    const mediaMap: Record<string, string> = {};
-    if (mediaFile) {
-        const mediaJson = JSON.parse(await mediaFile.async('string'));
-        for (const key in mediaJson) {
-            mediaMap[mediaJson[key]] = key; // map filename to its key
+        // 1. Load Media Map
+        let mediaMap: Record<string, string> = {};
+        const mediaFile = zipContent.file('media');
+        if (mediaFile) {
+            const mediaJson = await mediaFile.async('string');
+            mediaMap = JSON.parse(mediaJson); // Maps "numeric_id" -> "filename"
         }
-    }
+        console.log('[ankiParser] Media map loaded, entries:', Object.keys(mediaMap).length);
 
-    // Query for notes (the raw content)
-    onProgress(40, "Extraindo notas");
-    const notesStmt = db.prepare("SELECT id, mid, flds, tags FROM notes");
-    const notes: { id: number; mid: number; flds: string; tags: string[] }[] = [];
-    while (notesStmt.step()) {
-        const row = notesStmt.getAsObject();
-        notes.push({
-            id: row.id as number,
-            mid: row.mid as number,
-            flds: row.flds as string,
-            tags: (row.tags as string || '').trim().split(' ').filter(Boolean),
+        // 2. Extract Media Files to Object URLs
+        const mediaUrls: Record<string, string> = {};
+        for (const [id, filename] of Object.entries(mediaMap)) {
+            const fileData = zipContent.file(id);
+            if (fileData) {
+                const blob = await fileData.async('blob');
+                // Determine mime type based on extension
+                let mimeType = 'application/octet-stream';
+                if (filename.endsWith('.jpg') || filename.endsWith('.jpeg')) mimeType = 'image/jpeg';
+                else if (filename.endsWith('.png')) mimeType = 'image/png';
+                else if (filename.endsWith('.svg')) mimeType = 'image/svg+xml';
+                else if (filename.endsWith('.mp3')) mimeType = 'audio/mpeg';
+                else if (filename.endsWith('.ogg')) mimeType = 'audio/ogg';
+                else if (filename.endsWith('.wav')) mimeType = 'audio/wav';
+
+                const typedBlob = new Blob([blob], { type: mimeType });
+                mediaUrls[filename] = URL.createObjectURL(typedBlob);
+            }
+        }
+        console.log('[ankiParser] Media files extracted:', Object.keys(mediaUrls).length);
+
+        // 3. Load SQLite Database
+        const colFile = zipContent.file('collection.anki2');
+        if (!colFile) {
+            throw new Error('collection.anki2 not found in .apkg file');
+        }
+        const dbData = await colFile.async('uint8array');
+
+        const SQL = await initSqlJs({
+            locateFile: () => getSqlWasmUrl()
         });
-    }
-    notesStmt.free();
+        const db = new SQL.Database(dbData);
 
-    // Query for models (to understand the note structure)
-    onProgress(60, "Processando modelos de cards");
-    const colStmt = db.prepare("SELECT models, decks FROM col");
-    colStmt.step();
-    const colRow = colStmt.getAsObject();
-    const models = JSON.parse(colRow.models as string);
-    const decks = JSON.parse(colRow.decks as string);
-    colStmt.free();
-
-    const deckNameMap: Record<string, string> = {};
-    Object.keys(decks || {}).forEach(deckId => {
-        const deck = decks[deckId];
-        if (deck) {
-            deckNameMap[deckId] = deck.name || `Baralho ${deckId}`;
-        }
-    });
-
-    const cardsStmt = db.prepare("SELECT nid, did FROM cards");
-    const noteToDeckId = new Map<number, string>();
-    while (cardsStmt.step()) {
-        const row = cardsStmt.getAsObject();
-        const nid = row.nid as number;
-        const didValue = row.did as number;
-        if (nid && didValue && !noteToDeckId.has(nid)) {
-            noteToDeckId.set(nid, didValue.toString());
-        }
-    }
-    cardsStmt.free();
-
-    const ankiCards: AnkiCard[] = [];
-    const totalNotes = notes.length;
-
-    onProgress(75, "Montando flashcards");
-    for (let i = 0; i < totalNotes; i++) {
-        const note = notes[i];
-        const model = models[note.mid.toString()];
-        if (!model) continue;
-
-        // Find the index for front/back fields, accounting for decks that rename them
-        const fieldNames: string[] = model.flds.map((f: any) => f.name?.trim() ?? '');
-
-        const candidateFrontFields = ['Front', 'Text', 'Word', 'Question', 'Expression', 'Inglês', 'English'];
-        const candidateBackFields = ['Back', 'Answer', 'Meaning', 'Translation', 'Português', 'Portuguese'];
-
-        let frontIdx = candidateFrontFields
-            .map(name => fieldNames.findIndex(fieldName => fieldName.toLowerCase() === name.toLowerCase()))
-            .find(index => index !== -1) ?? -1;
-
-        let backIdx = candidateBackFields
-            .map(name => fieldNames.findIndex(fieldName => fieldName.toLowerCase() === name.toLowerCase()))
-            .find(index => index !== -1) ?? -1;
-
-        // Fallback: assume first field is the front and second is the back when not explicitly labeled
-        if (frontIdx === -1 && fieldNames.length > 0) {
-            frontIdx = 0;
+        // 4. Query Decks and Cards
+        const notesResult = db.exec("SELECT id, flds, tags FROM notes");
+        if (!notesResult.length) {
+            throw new Error('No notes found in database');
         }
 
-        if ((backIdx === -1 || backIdx === frontIdx) && fieldNames.length > 1) {
-            backIdx = frontIdx === 0 ? 1 : 0;
-        }
+        const notes = notesResult[0].values;
+        console.log('[ankiParser] Notes found:', notes.length);
 
-        if (frontIdx === -1 || backIdx === -1 || frontIdx === backIdx) {
-            console.warn('Anki import: skipping note due to unrecognized field layout:', { fieldNames, noteId: note.id });
-            continue;
-        }
+        const cards: AnkiCard[] = [];
 
-        const fields = note.flds.split('\x1f');
-        
-        // Log all fields for first card to debug
-        if (i === 0) {
-            console.log('[AnkiParser] First note all fields:', {
-                fieldNames: model.flds.map((f: any) => f.name),
-                allFields: fields.map((f, idx) => ({ index: idx, value: f.substring(0, 100) })),
-                selectedFrontIdx: frontIdx,
-                selectedBackIdx: backIdx
-            });
-        }
-        
-        // Get raw field values
-        let frontHtml = fields[frontIdx] || '';
-        let backHtml = fields[backIdx] || '';
-        
-        // If front field looks like metadata, try to find a better field
-        if (isLikelyMetadata(frontHtml)) {
-            console.warn('[AnkiParser] Front field looks like metadata, searching for better field:', stripHtml(frontHtml).substring(0, 50));
-            for (let j = 0; j < fields.length; j++) {
-                if (j !== frontIdx && j !== backIdx && !isLikelyMetadata(fields[j]) && fields[j].trim()) {
-                    console.log('[AnkiParser] Using field', j, 'as front instead:', stripHtml(fields[j]).substring(0, 50));
-                    frontHtml = fields[j];
-                    break;
-                }
+        for (const note of notes) {
+            const [id, flds, tags] = note as [number, string, string];
+            // Fields are separated by 0x1f (unit separator)
+            const fields = flds.split('\x1f');
+
+            if (fields.length < 2) {
+                continue;
             }
-        }
-        
-        // Same for back field
-        if (isLikelyMetadata(backHtml)) {
-            console.warn('[AnkiParser] Back field looks like metadata, searching for better field:', stripHtml(backHtml).substring(0, 50));
-            for (let j = 0; j < fields.length; j++) {
-                if (j !== frontIdx && j !== backIdx && !isLikelyMetadata(fields[j]) && fields[j].trim()) {
-                    console.log('[AnkiParser] Using field', j, 'as back instead:', stripHtml(fields[j]).substring(0, 50));
-                    backHtml = fields[j];
-                    break;
-                }
-            }
-        }
 
-        let frontText = stripAndClean(frontHtml);
-        if (!frontText) {
-            const alternativeFront = pickBestField(fields, new Set([backIdx].filter(idx => idx >= 0)));
-            if (alternativeFront) {
-                frontIdx = alternativeFront.idx;
-                frontHtml = alternativeFront.html;
-                frontText = alternativeFront.cleanedText;
-                console.log('[AnkiParser] Using alternative field as front:', {
-                    noteId: note.id,
-                    alternativeIndex: alternativeFront.idx,
-                    preview: frontText.substring(0, 80)
-                });
-            }
-        }
+            // Determine front/back
+            const usedIndices = new Set<number>();
+            const frontField = pickBestField(fields, usedIndices, true);
+            if (frontField) usedIndices.add(frontField.idx);
+            const backField = pickBestField(fields, usedIndices, false);
 
-        let backText = stripAndClean(backHtml);
-        if (!backText) {
-            const alternativeBack = pickBestField(
-                fields,
-                new Set([frontIdx].filter(idx => idx >= 0)),
-                true
-            );
-            if (alternativeBack) {
-                backIdx = alternativeBack.idx;
-                backHtml = alternativeBack.html;
-                backText = alternativeBack.cleanedText;
-                console.log('[AnkiParser] Using alternative field as back:', {
-                    noteId: note.id,
-                    alternativeIndex: alternativeBack.idx,
-                    preview: backText.substring(0, 80)
-                });
-            }
-        }
+            if (!frontField || !backField) continue;
 
-        // Extract all images and audio from both front and back
-        let imageB64: string | undefined = undefined;
-        let audioB64: string | undefined = undefined;
-        
-        const allImages = Array.from(new Set(fields.flatMap(extractAllImageSrcs)));
-        const allAudios = Array.from(new Set(fields.flatMap(extractAllAudioSrcs)));
+            const front = stripAndClean(frontField.html);
+            const back = stripAndClean(backField.html);
 
-        // Extract first image if available
-        if (allImages.length > 0) {
-            const imgName = allImages[0];
-            const fileKey = mediaMap[imgName] || imgName;
-            const imgFile = zip.file(fileKey);
-            if (imgFile) {
-                try {
-                    const imgData = await imgFile.async('base64');
-                    const mimeType = getMimeType(imgName);
-                    imageB64 = `data:${mimeType};base64,${imgData}`;
-                    console.log('[AnkiParser] Extracted image:', { imgName, mimeType, size: imgData.length });
-                } catch (error) {
-                    console.error('[AnkiParser] Failed to extract image:', { imgName, error });
-                }
-            }
-        }
-        
-        // Extract first audio if available
-        if (allAudios.length > 0) {
-            const audioName = allAudios[0];
-            const fileKey = mediaMap[audioName] || audioName;
-            const audioFile = zip.file(fileKey);
-            if (audioFile) {
-                try {
-                    const audioData = await audioFile.async('base64');
-                    const mimeType = getMimeType(audioName);
-                    audioB64 = `data:${mimeType};base64,${audioData}`;
-                    console.log('[AnkiParser] Extracted audio:', { audioName, mimeType, size: audioData.length });
-                } catch (error) {
-                    console.error('[AnkiParser] Failed to extract audio:', { audioName, error });
-                }
-            }
-        }
-        
-        if (!frontText && !backText) {
-            // Skip empty cards after cleaning
-            console.log('[AnkiParser] Skipping empty card after cleaning:', { noteId: note.id });
-            continue;
-        }
+            // Extract media
+            const allFieldsHtml = fields.join(' ');
+            const imageSrcs = extractAllImageSrcs(allFieldsHtml);
+            const audioSrcs = extractAllAudioSrcs(allFieldsHtml);
 
-        // Log first few cards for debugging
-        if (ankiCards.length < 3) {
-            console.log('[AnkiParser] Card extracted:', {
-                noteId: note.id,
-                frontText: frontText.substring(0, 50),
-                backText: backText.substring(0, 50),
-                hasImage: !!imageB64,
-                hasAudio: !!audioB64,
-                imageCount: allImages.length,
-                audioCount: allAudios.length,
-                fieldNames: model.flds.map((f: any) => f.name),
-                frontIdx,
-                backIdx
+            // Debug logging for first card
+            if (cards.length === 0) {
+                console.log('[ankiParser] First card debug:');
+                console.log('  Fields:', fields);
+                console.log('  Extracted Image Srcs:', imageSrcs);
+                console.log('  Extracted Audio Srcs:', audioSrcs);
+                console.log('  Media Map Keys Sample:', Object.keys(mediaUrls).slice(0, 5));
+            }
+
+            const imageUrls = imageSrcs.map(src => mediaUrls[src]).filter(Boolean);
+            const audioUrls = audioSrcs.map(src => mediaUrls[src]).filter(Boolean);
+
+            if (imageSrcs.length > 0 && imageUrls.length === 0) {
+                console.warn('[ankiParser] Warning: Images found in HTML but not in media map:', imageSrcs);
+            }
+
+            cards.push({
+                id: id.toString(),
+                front,
+                back,
+                imageUrl: imageUrls[0],
+                imageUrls: imageUrls.length > 0 ? imageUrls : undefined,
+                audioUrls: audioUrls.length > 0 ? audioUrls : undefined,
+                tags: tags ? tags.split(' ').filter(t => t) : undefined
             });
         }
 
-        const noteDeckId = noteToDeckId.get(note.id);
-        const noteDeckName = noteDeckId ? deckNameMap[noteDeckId] || `Deck ${noteDeckId}` : undefined;
+        db.close();
+        console.log('[ankiParser] Successfully parsed', cards.length, 'cards');
+        return cards;
 
-        ankiCards.push({
-            id: note.id,
-            front: frontText,
-            back: backText,
-            image: imageB64,
-            audio: audioB64,
-            tags: note.tags,
-            deckId: noteDeckId,
-            deckName: noteDeckName,
-        });
-
-        if (i % 10 === 0) {
-            onProgress(75 + Math.round((i / totalNotes) * 25), "Montando flashcards");
-        }
+    } catch (error) {
+        console.error('[ankiParser] Error parsing Anki deck:', error);
+        throw new Error(`Failed to parse Anki deck: ${error instanceof Error ? error.message : String(error)}`);
     }
-
-    db.close();
-    onProgress(100, "Concluído");
-    
-    const cardsWithImages = ankiCards.filter(c => c.image).length;
-    const cardsWithAudio = ankiCards.filter(c => c.audio).length;
-    
-    console.log('='.repeat(80));
-    console.log('🎴 [ANKI IMPORT] Import completed successfully');
-    console.log(`📊 Total cards: ${ankiCards.length}`);
-    console.log(`🖼️  Cards with images: ${cardsWithImages}`);
-    console.log(`🔊 Cards with audio: ${cardsWithAudio}`);
-    console.log('='.repeat(80));
-
-    return ankiCards;
 };

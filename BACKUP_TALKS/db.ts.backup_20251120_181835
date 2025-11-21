@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import { Settings, Flashcard, AnkiDeckSummary, LanguageCode, RawCard } from '../types';
+import { Settings, Flashcard, AnkiDeckSummary, LanguageCode } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
 import type { TranslatedCategories } from '../data/conversationCategories';
 
@@ -121,29 +121,6 @@ db.version(8).stores({
   conversaCache: 'cacheKey, cachedAt',
 });
 
-// Version 9: Add customCategories for user-created flashcard categories
-export interface CustomCategory {
-  id: string;
-  type: 'phrases' | 'objects';
-  name: string;
-  cards: RawCard[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-db.version(9).stores({
-  settings: 'id',
-  flashcards: 'id, sourceType, ankiDeckId',
-  phonetics: 'cardId',
-  imageOverrides: 'cardId',
-  ankiDecks: 'id, importedAt',
-  categoryTranslations: 'language',
-  categoryPhonetics: 'key',
-  imageCache: 'cardId, cachedAt',
-  conversaCache: 'cacheKey, cachedAt',
-  customCategories: 'id, type, name, createdAt',
-});
-
 const settingsTable: Table<SettingsRecord, number> = db.table('settings');
 const flashcardsTable: Table<Flashcard, string> = db.table('flashcards');
 const phoneticsTable: Table<PhoneticCache, string> = db.table('phonetics');
@@ -159,7 +136,6 @@ export interface CategoryPhoneticRecord {
 }
 const categoryPhoneticsTable: Table<CategoryPhoneticRecord, string> = db.table('categoryPhonetics');
 const imageCacheTable: Table<ImageCacheRecord, string> = db.table('imageCache');
-const customCategoriesTable: Table<CustomCategory, string> = db.table('customCategories');
 
 
 // --- Settings ---
@@ -468,14 +444,5 @@ export const getConversaCacheStats = async (): Promise<{ count: number; size: nu
   const allRecords = await conversaCacheTable.toArray();
   const size = allRecords.reduce((acc, record) => acc + record.cachedValue.length, 0);
   return { count: allRecords.length, size };
-};
-
-// --- Custom Categories ---
-export const saveCustomCategory = async (category: CustomCategory): Promise<void> => {
-  await customCategoriesTable.put(category);
-};
-
-export const getCustomCategories = async (type: 'phrases' | 'objects'): Promise<CustomCategory[]> => {
-  return customCategoriesTable.where('type').equals(type).sortBy('createdAt');
 };
 

@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { parseAnkiPackage } from '../services/ankiParser';
+import { parseAnkiDeck } from '../services/ankiParser';
 import { AnkiCard, Flashcard, Settings, ConversionConfig } from '../types';
 import { FlashcardItem } from './FlashcardsView';
 import { convertAnkiToLinguaFlow, ConversionResult } from '../services/ankiConverter';
@@ -65,12 +65,8 @@ const AnkiView: React.FC<AnkiViewProps> = ({ decks, onImportComplete, onConvertC
     setProgress(0);
 
     try {
-      console.log('[AnkiView] Calling parseAnkiPackage...');
-      const cards = await parseAnkiPackage(file, (progress, status) => {
-        console.log('[AnkiView] Progress:', progress, status);
-        setProgress(progress);
-        setStatusText(status);
-      });
+      console.log('[AnkiView] Calling parseAnkiDeck...');
+      const cards = await parseAnkiDeck(file);
 
       console.log('[AnkiView] Parsing complete. Cards found:', cards.length);
 
