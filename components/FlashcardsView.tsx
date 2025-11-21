@@ -207,6 +207,34 @@ export const FlashcardItem: React.FC<{
   );
 };
 
+const SWEAR_CARDS = [
+  { id: 'phr-swear-1', texts: { 'pt-BR': 'Idiota', 'en-US': 'Idiot' }, phoneticTexts: { 'en-US': '/ˈɪdiət/' } },
+  { id: 'phr-swear-2', texts: { 'pt-BR': 'Estúpido', 'en-US': 'Stupid' }, phoneticTexts: { 'en-US': '/ˈstuːpɪd/' } },
+  { id: 'phr-swear-3', texts: { 'pt-BR': 'Bobo', 'en-US': 'Fool' }, phoneticTexts: { 'en-US': '/fuːl/' } },
+  { id: 'phr-swear-4', texts: { 'pt-BR': 'Pateta', 'en-US': 'Jerk' }, phoneticTexts: { 'en-US': '/dʒɝk/' } },
+  { id: 'phr-swear-5', texts: { 'pt-BR': 'Chato', 'en-US': 'Annoying' }, phoneticTexts: { 'en-US': '/əˈnɔɪɪŋ/' } },
+  { id: 'phr-swear-6', texts: { 'pt-BR': 'Droga', 'en-US': 'Darn' }, phoneticTexts: { 'en-US': '/dɑrn/' } },
+  { id: 'phr-swear-7', texts: { 'pt-BR': 'Eita (leve)', 'en-US': 'Heck' }, phoneticTexts: { 'en-US': '/hɛk/' } },
+  { id: 'phr-swear-8', texts: { 'pt-BR': 'Maldito', 'en-US': 'Damn' }, phoneticTexts: { 'en-US': '/dæm/' } },
+  { id: 'phr-swear-9', texts: { 'pt-BR': 'Burro', 'en-US': 'Ass' }, phoneticTexts: { 'en-US': '/æs/' } },
+  { id: 'phr-swear-10', texts: { 'pt-BR': 'Canalha', 'en-US': 'Bastard' }, phoneticTexts: { 'en-US': '/ˈbæstərd/' } },
+  { id: 'phr-swear-11', texts: { 'pt-BR': 'Cadela (insulto)', 'en-US': 'Bitch' }, phoneticTexts: { 'en-US': '/bɪtʃ/' } },
+  { id: 'phr-swear-12', texts: { 'pt-BR': 'Filho da mãe', 'en-US': 'Son of a gun' }, phoneticTexts: { 'en-US': '/sʌn əv ə ɡʌn/' } },
+  { id: 'phr-swear-13', texts: { 'pt-BR': 'Merda', 'en-US': 'Crap' }, phoneticTexts: { 'en-US': '/kræp/' } },
+  { id: 'phr-swear-14', texts: { 'pt-BR': 'Besteira', 'en-US': 'Bullshit' }, phoneticTexts: { 'en-US': '/ˈbʊlʃɪt/' } },
+  { id: 'phr-swear-15', texts: { 'pt-BR': 'Cai fora', 'en-US': 'Piss off' }, phoneticTexts: { 'en-US': '/pɪs ɔf/' } },
+  { id: 'phr-swear-16', texts: { 'pt-BR': 'Babaca', 'en-US': 'Asshole' }, phoneticTexts: { 'en-US': '/ˈæshoʊl/' } },
+  { id: 'phr-swear-17', texts: { 'pt-BR': 'Pau (insulto)', 'en-US': 'Dick' }, phoneticTexts: { 'en-US': '/dɪk/' } },
+  { id: 'phr-swear-18', texts: { 'pt-BR': 'Merda (forte)', 'en-US': 'Shit' }, phoneticTexts: { 'en-US': '/ʃɪt/' } },
+  { id: 'phr-swear-19', texts: { 'pt-BR': 'Foda-se você', 'en-US': 'Screw you' }, phoneticTexts: { 'en-US': '/skruː juː/' } },
+  { id: 'phr-swear-20', texts: { 'pt-BR': 'Vai se foder', 'en-US': 'Fuck off' }, phoneticTexts: { 'en-US': '/fʌk ɔf/' } },
+  { id: 'phr-swear-21', texts: { 'pt-BR': 'Foda', 'en-US': 'Fuck' }, phoneticTexts: { 'en-US': '/fʌk/' } },
+  { id: 'phr-swear-22', texts: { 'pt-BR': 'Filho da puta', 'en-US': 'Son of a bitch' }, phoneticTexts: { 'en-US': '/sʌn əv ə bɪtʃ/' } },
+  { id: 'phr-swear-23', texts: { 'pt-BR': 'Desgraçado (forte)', 'en-US': 'Motherfucker' }, phoneticTexts: { 'en-US': '/ˈmʌðərˌfʌkər/' } },
+  { id: 'phr-swear-24', texts: { 'pt-BR': 'Vagabunda (insulto)', 'en-US': 'Whore' }, phoneticTexts: { 'en-US': '/hɔr/' } },
+  { id: 'phr-swear-25', texts: { 'pt-BR': 'Insulto extremo', 'en-US': 'Cunt' }, phoneticTexts: { 'en-US': '/kʌnt/' } },
+];
+
 const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, settings, onBack, onImageChange }) => {
   const [activeTab, setActiveTab] = useState<'phrases' | 'objects'>('phrases');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -269,6 +297,29 @@ const FlashcardsView: React.FC<FlashcardsViewProps> = ({ categorizedFlashcards, 
     };
     loadCustomCategories();
   }, []);
+
+  const hasUpdatedSwearRef = useRef(false);
+  useEffect(() => {
+    const replaceSwearCategory = async () => {
+      if (hasUpdatedSwearRef.current) return;
+      try {
+        const phrases = await db.getCustomCategories('phrases');
+        const target = phrases.find(c => c.name === 'Palavrões e Xingamentos');
+        if (!target) return;
+        const updated = { ...target, cards: SWEAR_CARDS, updatedAt: new Date().toISOString() };
+        await db.saveCustomCategory(updated);
+        const refreshed = await db.getCustomCategories('phrases');
+        setCustomCategories(prev => ({ ...prev, phrases: refreshed }));
+        if (selectedCategory === 'Palavrões e Xingamentos') {
+          setCurrentIndex(0);
+        }
+        hasUpdatedSwearRef.current = true;
+      } catch (e) {
+        console.error('[FlashcardsView] Failed to replace swear category', e);
+      }
+    };
+    replaceSwearCategory();
+  }, [selectedCategory]);
 
   useEffect(() => {
     if (activeTab !== 'objects' || cards.length === 0) {
