@@ -76,6 +76,10 @@ export const clearAllCachedImages = async (): Promise<void> => {
     console.log('[ImageCache] All cached images cleared');
 };
 
+export const invalidateImageCache = async (cardId: string): Promise<void> => {
+    await db.deleteImageFromCache(cardId);
+};
+
 /**
  * Gets statistics about cached images
  */

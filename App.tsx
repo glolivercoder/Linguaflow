@@ -17,6 +17,7 @@ import { CATEGORY_DEFINITIONS, CATEGORY_KEYS, BASE_CATEGORY_LANGUAGE_NAME, type 
 import { saveCategoryTranslations, getCategoryTranslations, getCategoryPhonetic, saveCategoryPhonetic } from './services/db';
 import { ImageOverride } from './services/db';
 import { downloadPixabayLogs, clearPixabayLogs, addPixabayLog, getPixabayLogs } from './services/pixabayLogger';
+import { invalidateImageCache } from './services/imageCacheService';
 import { triggerBackupOnFlashcardAdd, triggerBackupOnSettingsChange, triggerBackupOnTranslationCache } from './services/autoBackupService';
 
 type CategorizedFlashcards = Record<'phrases' | 'objects', Record<string, Flashcard[]>>;
@@ -401,6 +402,8 @@ const App: React.FC = () => {
       });
       return newOverrides;
     });
+
+    await invalidateImageCache(cardId);
 
     // 2. Persist the change to the database in the background.
     await db.saveImageOverride(cardId, newImageUrl);

@@ -480,6 +480,10 @@ export const clearImageCache = async (): Promise<void> => {
   await imageCacheTable.clear();
 };
 
+export const deleteImageFromCache = async (cardId: string): Promise<void> => {
+  await imageCacheTable.delete(cardId);
+};
+
 export const getAllCachedImages = async (): Promise<ImageCacheRecord[]> => {
   return imageCacheTable.toArray();
 };
