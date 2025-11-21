@@ -4,6 +4,7 @@ import { Flashcard, Settings, LanguageCode, RawCard } from '../types';
 import { searchImages } from '../services/pixabayService';
 import { SUPPORTED_LANGUAGES } from '../constants';
 import { SpeakerIcon, ImageIcon, PlusCircleIcon } from './icons';
+import { downloadAndCacheImage, getCachedImageUrl } from '../services/imageCacheService';
 import { playAudio as playLocalAudio } from '../services/ttsService';
 import * as db from '../services/db';
 import { CustomCategoryManager } from './CustomCategoryManager';
@@ -78,6 +79,7 @@ export const FlashcardItem: React.FC<{
   // Estado de transcrição fonética desabilitado
   const phoneticText = null;
   const isLoadingPhonetics = false;
+  const [displayImageUrl, setDisplayImageUrl] = useState<string | undefined>(card.imageUrl);
 
   useEffect(() => {
     // Reset state when card changes
@@ -88,6 +90,25 @@ export const FlashcardItem: React.FC<{
       originalText: card.originalText 
     });
   }, [card]);
+
+  useEffect(() => {
+    let canceled = false;
+    const load = async () => {
+      if (!card.imageUrl) {
+        setDisplayImageUrl(undefined);
+        return;
+      }
+      const cached = await getCachedImageUrl(card.id);
+      if (cached) {
+        if (!canceled) setDisplayImageUrl(cached);
+        return;
+      }
+      const url = await downloadAndCacheImage(card.imageUrl, card.id);
+      if (!canceled) setDisplayImageUrl(url);
+    };
+    load();
+    return () => { canceled = true; };
+  }, [card.id, card.imageUrl]);
 
 
   const playAudio = useCallback(async (text: string, lang: LanguageCode) => {
@@ -126,26 +147,26 @@ export const FlashcardItem: React.FC<{
   const backPhoneticText = null; // Desabilitado
 
   const renderImage = () => {
-    if (!card.imageUrl) {
+    if (!displayImageUrl) {
       console.log('[FlashcardItem] No imageUrl for card:', { cardId: card.id, frontText });
       return null;
     }
     
     console.log('[FlashcardItem] Rendering image:', { 
       cardId: card.id, 
-      imageUrl: card.imageUrl,
+      imageUrl: displayImageUrl,
       frontText 
     });
     
     return (
       <img
-        src={card.imageUrl}
+        src={displayImageUrl}
         alt={frontText}
         className="w-full h-48 object-cover rounded-t-xl flex-shrink-0"
         onLoad={() => console.log('[FlashcardItem] Image loaded successfully:', card.id)}
         onError={(e) => console.error('[FlashcardItem] Image failed to load:', { 
           cardId: card.id, 
-          imageUrl: card.imageUrl,
+          imageUrl: displayImageUrl,
           error: e 
         })}
       />

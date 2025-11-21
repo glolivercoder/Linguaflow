@@ -166,14 +166,17 @@ export default {
 /**
  * Fetches available models from OpenRouter API
  */
-export async function fetchOpenRouterModels(apiKey: string): Promise<OpenRouterModelSummary[]> {
+export async function fetchOpenRouterModels({
+  search,
+  includeFree,
+  includePaid,
+}: {
+  search: string;
+  includeFree: boolean;
+  includePaid: boolean;
+}): Promise<OpenRouterModelSummary[]> {
   try {
-    const response = await fetch(`${PROXY_BASE_URL}/openrouter/models`, {
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    const response = await fetch(`${PROXY_BASE_URL}/openrouter/models`);
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
@@ -183,19 +186,25 @@ export async function fetchOpenRouterModels(apiKey: string): Promise<OpenRouterM
     }
 
     const data = await response.json();
-    
-    // Mapeia os modelos para o formato esperado pelo componente
-    return data.data.map((model: any) => ({
+
+    const all = data.data.map((model: any) => ({
       id: model.id,
       name: model.name,
       description: model.description || '',
       context_length: model.context_length || 0,
-      pricing: {
-        prompt: model.pricing?.prompt || '0',
-        completion: model.pricing?.completion || '0',
-        request: model.pricing?.request || '0',
-      },
-    }));
+      pricing: model.pricing || null,
+      tags: model.tags || null,
+    })) as OpenRouterModelSummary[];
+
+    const q = (search || '').toLowerCase();
+    const filtered = all.filter((m) => {
+      const nameMatch = m.name?.toLowerCase().includes(q) || m.id.toLowerCase().includes(q);
+      const isFree = m.pricing && (m.pricing as any).request === '0' && (m.pricing as any).prompt === '0' && (m.pricing as any).completion === '0';
+      const passPrice = (includeFree || !isFree) && (includePaid || isFree);
+      return nameMatch && passPrice;
+    });
+
+    return filtered;
   } catch (error) {
     console.error('Error fetching OpenRouter models:', error);
     throw error;

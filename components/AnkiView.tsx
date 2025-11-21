@@ -108,7 +108,7 @@ const AnkiView: React.FC<AnkiViewProps> = ({ decks, onImportComplete, onConvertC
     try {
       // Get all cards from all decks
       const allCards: AnkiCard[] = [];
-      for (const [deckId, deckInfo] of Object.entries(decks)) {
+      for (const [deckId, deckInfo] of Object.entries(decks) as [string, { name: string; cards: Flashcard[] }][]) {
         // Convert Flashcard back to AnkiCard format
         deckInfo.cards.forEach(card => {
           if (card.ankiNoteId) {

@@ -35,6 +35,7 @@ export interface Settings {
   openRouterModelId?: string;
   openRouterIncludeFree?: boolean;
   openRouterIncludePaid?: boolean;
+  phoneticFormat?: PhoneticFormat;
 }
 
 export type View = 'conversation' | 'flashcards' | 'settings' | 'anki' | 'smartLearn' | 'licoes';
@@ -54,7 +55,8 @@ export interface VoiceModelInfo {
 export interface RawCard {
     id: string;
     texts: MultilingualText;
-    imageUrl?: string; // Add imageUrl to raw card data
+    phoneticTexts?: MultilingualText;
+    imageUrl?: string;
 }
 
 export interface RawCategory {
@@ -76,6 +78,8 @@ export interface OpenRouterModelSummary {
     tags?: string[] | null;
 }
 
+export type PhoneticFormat = 'simplified' | 'ipa';
+
 // --- Types for Anki Importer ---
 export interface AnkiCard {
     id: number;
@@ -93,4 +97,21 @@ export interface AnkiDeckSummary {
     name: string;
     cardCount: number;
     importedAt: number;
+}
+
+export interface ConversionConfig {
+    nativeLanguage: LanguageCode;
+    learningLanguage: LanguageCode;
+    usePixabayForImages: boolean;
+    enableOCR: boolean;
+    generatePhonetics: boolean;
+}
+
+export interface CustomCategory {
+  id: string;
+  type: 'phrases' | 'objects';
+  name: string;
+  cards: RawCard[];
+  createdAt: string;
+  updatedAt: string;
 }

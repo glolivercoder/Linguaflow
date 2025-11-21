@@ -276,13 +276,12 @@ export const parseAnkiDeck = async (file: File): Promise<AnkiCard[]> => {
             }
 
             cards.push({
-                id: id.toString(),
+                id: id,
                 front,
                 back,
-                imageUrl: imageUrls[0],
-                imageUrls: imageUrls.length > 0 ? imageUrls : undefined,
-                audioUrls: audioUrls.length > 0 ? audioUrls : undefined,
-                tags: tags ? tags.split(' ').filter(t => t) : undefined
+                image: imageUrls[0],
+                audio: audioUrls.length > 0 ? audioUrls[0] : undefined,
+                tags: tags ? tags.split(' ').filter(t => t) : []
             });
         }
 

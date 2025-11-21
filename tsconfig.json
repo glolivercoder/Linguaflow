@@ -26,5 +26,11 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "exclude": [
+    "backend/**",
+    "**/venv/**",
+    "node_modules",
+    "dist"
+  ]
 }

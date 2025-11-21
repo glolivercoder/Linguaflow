@@ -470,13 +470,8 @@ export const getConversaCacheStats = async (): Promise<{ count: number; size: nu
   return { count: allRecords.length, size };
 };
 
-// --- Custom Categories ---
-export const saveCustomCategory = async (category: CustomCategory): Promise<void> => {
-  await customCategoriesTable.put(category);
-};
-
-export const getCustomCategories = async (type: 'phrases' | 'objects'): Promise<CustomCategory[]> => {
-  return customCategoriesTable.where('type').equals(type).sortBy('createdAt');
+export const getAllConversaCache = async (): Promise<ConversaCacheRecord[]> => {
+  return conversaCacheTable.toArray();
 };
 
 export const getCustomCategoryByName = async (
@@ -509,3 +504,22 @@ export const appendCardsToCustomCategory = async (
   await customCategoriesTable.put(merged);
 };
 
+export const getAllCustomCategories = async (): Promise<CustomCategory[]> => {
+  return customCategoriesTable.toArray();
+};
+
+export const deleteCustomCategory = async (id: string): Promise<void> => {
+  await customCategoriesTable.delete(id);
+};
+
+export const updateCustomCategory = async (category: CustomCategory): Promise<void> => {
+  await customCategoriesTable.put({ ...category, updatedAt: new Date().toISOString() });
+};
+
+export const getCustomCategories = async (type: 'phrases' | 'objects'): Promise<CustomCategory[]> => {
+  return customCategoriesTable.where('type').equals(type).toArray();
+};
+
+export const saveCustomCategory = async (category: CustomCategory): Promise<void> => {
+  await customCategoriesTable.put({ ...category, updatedAt: new Date().toISOString() });
+};
