@@ -83,3 +83,10 @@ build/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Anki Basic - Exclude backups and large files
+anki_basic/backup*/
+anki_basic/*backup*/
+anki_basic/node_modules/
+anki_basic/package-lock.json
+anki_basic/build/
