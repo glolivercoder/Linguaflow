@@ -2,6 +2,11 @@
 import { PROXY_BASE_URL } from './proxyClient';
 import { OpenRouterModelSummary } from '../types';
 
+export interface OpenRouterModelsResult {
+  models: OpenRouterModelSummary[];
+  providers: string[];
+}
+
 export interface VoskResponse {
   transcription: string;
   llm_response?: string;
@@ -166,15 +171,61 @@ export default {
 /**
  * Fetches available models from OpenRouter API
  */
+const parsePriceToNumber = (value: unknown): number | null => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === 'string') {
+    const cleaned = value.replace(/[^0-9.\-]/g, '');
+    if (!cleaned) {
+      return null;
+    }
+    const parsed = Number.parseFloat(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const determineIsFree = (pricing: Record<string, unknown> | null | undefined): boolean => {
+  if (!pricing) {
+    return false;
+  }
+  const keys: Array<'prompt' | 'completion' | 'request'> = ['prompt', 'completion', 'request'];
+  const values = keys
+    .map((key) => parsePriceToNumber((pricing as any)[key]))
+    .filter((value): value is number => value !== null);
+
+  if (values.length === 0) {
+    return false;
+  }
+
+  return values.every((value) => value === 0);
+};
+
+const extractProvider = (model: any): string => {
+  if (typeof model.provider === 'string' && model.provider.trim()) {
+    return model.provider.trim();
+  }
+  if (typeof model.id === 'string' && model.id.includes('/')) {
+    return model.id.split('/')[0];
+  }
+  return 'desconhecido';
+};
+
 export async function fetchOpenRouterModels({
   search,
   includeFree,
   includePaid,
+  provider,
 }: {
   search: string;
   includeFree: boolean;
   includePaid: boolean;
-}): Promise<OpenRouterModelSummary[]> {
+  provider?: string;
+}): Promise<OpenRouterModelsResult> {
   try {
     const response = await fetch(`${PROXY_BASE_URL}/openrouter/models`);
 
@@ -187,24 +238,59 @@ export async function fetchOpenRouterModels({
 
     const data = await response.json();
 
-    const all = data.data.map((model: any) => ({
-      id: model.id,
-      name: model.name,
-      description: model.description || '',
-      context_length: model.context_length || 0,
-      pricing: model.pricing || null,
-      tags: model.tags || null,
-    })) as OpenRouterModelSummary[];
+    const mapped = (data.data || []).map((model: any) => {
+      const providerName = extractProvider(model);
+      const pricing = model.pricing || null;
+      const isFree = determineIsFree(pricing);
 
-    const q = (search || '').toLowerCase();
-    const filtered = all.filter((m) => {
-      const nameMatch = m.name?.toLowerCase().includes(q) || m.id.toLowerCase().includes(q);
-      const isFree = m.pricing && (m.pricing as any).request === '0' && (m.pricing as any).prompt === '0' && (m.pricing as any).completion === '0';
-      const passPrice = (includeFree || !isFree) && (includePaid || isFree);
-      return nameMatch && passPrice;
+      return {
+        id: model.id,
+        name: model.name,
+        description: model.description || '',
+        context_length: model.context_length || 0,
+        pricing,
+        tags: model.tags || null,
+        provider: providerName,
+        isFree,
+      } as OpenRouterModelSummary;
     });
 
-    return filtered;
+    const providerSet = new Set<string>();
+    mapped.forEach((model) => {
+      if (model.provider) {
+        providerSet.add(model.provider);
+      }
+    });
+
+    const availableProviders = Array.from(providerSet).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base' })
+    );
+
+    const normalizedSearch = (search || '').toLowerCase();
+    const normalizedProvider = provider?.toLowerCase();
+
+    const filtered = mapped.filter((m) => {
+      const searchMatch =
+        !normalizedSearch ||
+        m.name?.toLowerCase().includes(normalizedSearch) ||
+        m.id.toLowerCase().includes(normalizedSearch) ||
+        m.description?.toLowerCase().includes(normalizedSearch) ||
+        m.tags?.some((tag) => tag.toLowerCase().includes(normalizedSearch));
+
+      const providerMatch =
+        !normalizedProvider ||
+        normalizedProvider === 'all' ||
+        m.provider?.toLowerCase() === normalizedProvider;
+
+      const priceMatch = m.isFree ? includeFree : includePaid;
+
+      return searchMatch && providerMatch && priceMatch;
+    });
+
+    return {
+      models: filtered,
+      providers: availableProviders,
+    };
   } catch (error) {
     console.error('Error fetching OpenRouter models:', error);
     throw error;

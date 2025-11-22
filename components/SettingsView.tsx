@@ -1,6 +1,6 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Settings, VoiceGender, AnkiDeckSummary, VoiceModelInfo, OpenRouterModelSummary, PhoneticFormat } from '../types';
+import { Settings, VoiceGender, VoiceModelInfo, OpenRouterModelSummary, PhoneticFormat } from '../types';
 import { SUPPORTED_LANGUAGES } from '../constants';
 import { generateReferenceAudio, listVoiceModels } from '../services/pronunciationService';
 import { translateText, getPhonetics } from '../services/geminiService';
@@ -10,15 +10,13 @@ import { fetchOpenRouterModels } from '../services/voskService';
 
 interface SettingsViewProps {
   settings: Settings;
-  ankiDecks: AnkiDeckSummary[];
   onSettingsChange: (newSettings: Settings) => void;
-  onRemoveAnkiDeck: (deckId: string) => void;
   onExportBackup: () => void;
   onImportBackup: (file: File) => Promise<void>;
   onBack: () => void;
 }
 
-const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSettingsChange, onRemoveAnkiDeck, onExportBackup, onImportBackup, onBack }) => {
+const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSettingsChange, onExportBackup, onImportBackup, onBack }) => {
 
   const [voiceModels, setVoiceModels] = useState<VoiceModelInfo[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -43,6 +41,8 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
   const [modelSearch, setModelSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [modelsReloadToken, setModelsReloadToken] = useState(0);
+  const [providerFilter, setProviderFilter] = useState('all');
+  const [availableProviders, setAvailableProviders] = useState<string[]>([]);
   const [isPreprocessing, setIsPreprocessing] = useState(false);
   const [preprocessStatus, setPreprocessStatus] = useState('');
   const [preprocessProgress, setPreprocessProgress] = useState(0);
@@ -89,13 +89,21 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
       try {
         setIsLoadingOpenRouter(true);
         setOpenRouterError(null);
-        const models = await fetchOpenRouterModels({
+        const result = await fetchOpenRouterModels({
           search: debouncedSearch,
           includeFree,
           includePaid,
+          provider: providerFilter,
         });
         if (!cancelled) {
-          setOpenRouterModels(models);
+          setOpenRouterModels(result.models);
+          setAvailableProviders(result.providers);
+          if (result.providers.length > 0 && providerFilter !== 'all') {
+            const exists = result.providers.some(p => p.toLowerCase() === providerFilter.toLowerCase());
+            if (!exists) {
+              setProviderFilter('all');
+            }
+          }
         }
       } catch (error) {
         if (!cancelled) {
@@ -113,7 +121,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
     return () => {
       cancelled = true;
     };
-  }, [settings.useVoskStt, includeFree, includePaid, debouncedSearch, modelsReloadToken]);
+  }, [settings.useVoskStt, includeFree, includePaid, debouncedSearch, modelsReloadToken, providerFilter]);
 
   const handleModelChange = (value: string) => {
     onSettingsChange({
@@ -494,6 +502,21 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
                     className="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
                   />
                 </div>
+                <div className="flex flex-col gap-2">
+                  <label className="block text-xs font-semibold text-gray-300 uppercase tracking-wide">
+                    Provedor
+                  </label>
+                  <select
+                    value={providerFilter}
+                    onChange={(event) => setProviderFilter(event.target.value)}
+                    className="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                  >
+                    <option value="all">Todos</option>
+                    {availableProviders.map(provider => (
+                      <option key={provider} value={provider}>{provider}</option>
+                    ))}
+                  </select>
+                </div>
                 <div className="flex items-center justify-between gap-3">
                   <label className="inline-flex items-center gap-2 text-sm text-gray-300">
                     <input
@@ -825,36 +848,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ settings, ankiDecks, onSett
           </div>
         </div>
 
-        <div className="mt-6 p-4 bg-gray-800 rounded-lg">
-          <h4 className="font-semibold text-gray-300 mb-3">Baralhos importados do Anki</h4>
-          {ankiDecks.length === 0 ? (
-            <p className="text-sm text-gray-400">Nenhum baralho do Anki importado até o momento.</p>
-          ) : (
-            <ul className="space-y-3">
-              {ankiDecks.map(deck => (
-                <li key={deck.id} className="flex items-start justify-between gap-4 bg-gray-900/60 border border-gray-700 rounded-lg p-3">
-                  <div>
-                    <p className="text-sm font-semibold text-white">{deck.name}</p>
-                    <p className="text-xs text-gray-400 mt-1">{deck.cardCount} cards importados</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      if (window.confirm(`Remover o baralho "${deck.name}" e todos os cards associados?`)) {
-                        onRemoveAnkiDeck(deck.id);
-                      }
-                    }}
-                    className="px-3 py-1 text-sm bg-red-600 hover:bg-red-500 text-white rounded-md transition-colors"
-                  >
-                    Remover
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="text-xs text-gray-500 mt-3">
-            A remoção exclui todos os cards importados desse baralho, bem como imagens sobrescritas ou dados de pronúncia em cache relacionados.
-          </p>
-        </div>
+
 
       </div>
 

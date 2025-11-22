@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { View, Settings, Flashcard, RawCard, AnkiCard, AnkiDeckSummary } from './types';
+import { View, Settings, Flashcard, RawCard } from './types';
 import { DEFAULT_SETTINGS } from './constants';
 import { PREDEFINED_FLASHCARD_DATA } from './data/flashcardData';
 import ConversationView from './components/ConversationView';
@@ -22,56 +22,12 @@ import { triggerBackupOnFlashcardAdd, triggerBackupOnSettingsChange, triggerBack
 
 type CategorizedFlashcards = Record<'phrases' | 'objects', Record<string, Flashcard[]>>;
 
-const UNKNOWN_ANKI_DECK_ID = 'anki-unknown';
-const UNKNOWN_ANKI_DECK_NAME = 'Baralho Anki';
-
-const isAnkiFlashcard = (card: Flashcard): boolean =>
-  card.sourceType === 'anki' || card.id.startsWith('anki-');
-
-const buildDeckSummaries = (
-  cards: Flashcard[],
-  existingSummaries: AnkiDeckSummary[]
-): AnkiDeckSummary[] => {
-  const existingMap = new Map(existingSummaries.map(summary => [summary.id, summary]));
-  const aggregate = new Map<string, { name: string; count: number }>();
-
-  cards.forEach(card => {
-    if (!isAnkiFlashcard(card)) {
-      return;
-    }
-
-    const deckId = card.ankiDeckId || UNKNOWN_ANKI_DECK_ID;
-    const deckName = card.ankiDeckName || UNKNOWN_ANKI_DECK_NAME;
-    const current = aggregate.get(deckId);
-    if (current) {
-      current.count += 1;
-      if (!current.name && deckName) {
-        current.name = deckName;
-      }
-    } else {
-      aggregate.set(deckId, { name: deckName, count: 1 });
-    }
-  });
-
-  const rebuilt = Array.from(aggregate.entries()).map(([deckId, data]) => ({
-    id: deckId,
-    name: data.name || UNKNOWN_ANKI_DECK_NAME,
-    cardCount: data.count,
-    importedAt: existingMap.get(deckId)?.importedAt ?? Date.now(),
-  }));
-
-  rebuilt.sort((a, b) => b.importedAt - a.importedAt);
-
-  return rebuilt;
-};
-
 const App: React.FC = () => {
   const [view, setView] = useState<View>('conversation');
   const [settings, setSettings] = useState<Settings | null>(null);
   const [userFlashcards, setUserFlashcards] = useState<Flashcard[]>([]);
   const [phoneticCache, setPhoneticCache] = useState<Awaited<ReturnType<typeof db.getAllPhonetics>>>([]);
   const [imageOverrides, setImageOverrides] = useState<ImageOverride[]>([]);
-  const [ankiDecks, setAnkiDecks] = useState<AnkiDeckSummary[]>([]);
   const [isAutoPreprocessing, setIsAutoPreprocessing] = useState(false);
   const [autoPreprocessStatus, setAutoPreprocessStatus] = useState('');
   const [autoPreprocessProgress, setAutoPreprocessProgress] = useState(0);
@@ -80,18 +36,16 @@ const App: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [savedSettings, savedFlashcards, savedPhonetics, savedImageOverrides, savedAnkiDecks] = await Promise.all([
+        const [savedSettings, savedFlashcards, savedPhonetics, savedImageOverrides] = await Promise.all([
           db.getSettings(),
           db.getFlashcards(),
           db.getAllPhonetics(),
           db.getAllImageOverrides(),
-          db.getAnkiDeckSummaries(),
         ]);
         setSettings(savedSettings);
         setUserFlashcards(savedFlashcards);
         setPhoneticCache(savedPhonetics);
         setImageOverrides(savedImageOverrides);
-        setAnkiDecks(savedAnkiDecks);
       } catch (error) {
         console.error("Fatal: Failed to load initial data from the database.", error);
         // If loading fails, fall back to default settings to prevent a crash.
@@ -99,7 +53,6 @@ const App: React.FC = () => {
         setUserFlashcards([]);
         setPhoneticCache([]);
         setImageOverrides([]);
-        setAnkiDecks([]);
       }
     };
     loadData();
@@ -278,42 +231,13 @@ const App: React.FC = () => {
 
     // Add user's saved flashcards to a special "Minhas Frases" category.
     if (userFlashcards.length > 0) {
-      const userCreatedCards = userFlashcards.filter(card => !isAnkiFlashcard(card));
-
-      if (userCreatedCards.length > 0) {
-        processed.phrases["Minhas Frases"] = userCreatedCards;
-      }
+      processed.phrases["Minhas Frases"] = userFlashcards;
     }
 
     return processed;
   }, [settings, userFlashcards, phoneticCache, imageOverrides]);
 
-  const ankiDeckCards = useMemo(() => {
-    const deckMap = new Map<string, { name: string; cards: Flashcard[] }>();
-    userFlashcards.forEach(card => {
-      if (!isAnkiFlashcard(card)) {
-        return;
-      }
 
-      const deckId = card.ankiDeckId || UNKNOWN_ANKI_DECK_ID;
-      const deckName = card.ankiDeckName || UNKNOWN_ANKI_DECK_NAME;
-      const existing = deckMap.get(deckId);
-      if (existing) {
-        existing.cards.push(card);
-        if (!existing.name && deckName) {
-          existing.name = deckName;
-        }
-      } else {
-        deckMap.set(deckId, { name: deckName, cards: [card] });
-      }
-    });
-
-    const result: Record<string, { name: string; cards: Flashcard[] }> = {};
-    deckMap.forEach((value, key) => {
-      result[key] = value;
-    });
-    return result;
-  }, [userFlashcards]);
 
 
   const handleSettingsChange = (newSettings: Settings) => {
@@ -348,19 +272,17 @@ const App: React.FC = () => {
       const parsed = JSON.parse(text) as db.DatabaseSnapshot;
       await db.importDatabaseSnapshot(parsed);
 
-      const [savedSettings, savedFlashcards, savedPhonetics, savedImageOverrides, savedAnkiDecks] = await Promise.all([
+      const [savedSettings, savedFlashcards, savedPhonetics, savedImageOverrides] = await Promise.all([
         db.getSettings(),
         db.getFlashcards(),
         db.getAllPhonetics(),
         db.getAllImageOverrides(),
-        db.getAnkiDeckSummaries(),
       ]);
 
       setSettings(savedSettings);
       setUserFlashcards(savedFlashcards);
       setPhoneticCache(savedPhonetics);
       setImageOverrides(savedImageOverrides);
-      setAnkiDecks(savedAnkiDecks);
       alert('Backup restaurado com sucesso!');
       if (savedSettings) {
         autoPreprocessIfNeeded(savedSettings);
@@ -410,96 +332,7 @@ const App: React.FC = () => {
     addPixabayLog('info', 'Image persisted to override store', { cardId });
   }, []);
 
-  const handleAnkiImport = useCallback(async (ankiCards: AnkiCard[]) => {
-    if (!settings) return;
 
-    console.log('='.repeat(80));
-    console.log('💾 [APP] Processing Anki cards for database');
-    console.log(`📦 Received ${ankiCards.length} cards from parser`);
-    console.log('='.repeat(80));
-
-    const now = Date.now();
-    const newFlashcards: Flashcard[] = ankiCards.map((ankiCard, index) => {
-      const deckId = ankiCard.deckId || UNKNOWN_ANKI_DECK_ID;
-      const deckName = ankiCard.deckName || UNKNOWN_ANKI_DECK_NAME;
-      const flashcard: Flashcard = {
-        id: `anki-${ankiCard.id}-${now + index}`, // Ensure unique ID even within same millisecond
-        // Match the pattern from ConversationView: original=native, translated=learning
-        originalText: ankiCard.back,      // Native language (back of Anki card)
-        translatedText: ankiCard.front,   // Learning language (front of Anki card)
-        phoneticText: '',
-        originalLang: settings.nativeLanguage,
-        translatedLang: settings.learningLanguage,
-        imageUrl: ankiCard.image,
-        sourceType: 'anki',
-        ankiDeckId: deckId,
-        ankiDeckName: deckName,
-        ankiNoteId: ankiCard.id,
-      };
-
-      // Log first 3 cards for debugging
-      if (index < 3) {
-        console.log(`🔍 [APP] Card ${index + 1}/${ankiCards.length}:`, {
-          ankiId: ankiCard.id,
-          front: ankiCard.front?.substring(0, 50),
-          back: ankiCard.back?.substring(0, 50),
-          hasImage: !!ankiCard.image,
-          hasAudio: !!ankiCard.audio,
-          imageLength: ankiCard.image?.length || 0,
-          imagePrefix: ankiCard.image?.substring(0, 50)
-        });
-      }
-
-      return flashcard;
-    });
-
-    await db.bulkAddFlashcards(newFlashcards);
-    console.log('✅ [APP] Anki cards saved to DB');
-
-    // Reload all flashcards from DB to ensure state is in sync
-    const [allFlashcards, allPhonetics, allImageOverrides] = await Promise.all([
-      db.getFlashcards(),
-      db.getAllPhonetics(),
-      db.getAllImageOverrides(),
-    ]);
-    setUserFlashcards(allFlashcards);
-    setPhoneticCache(allPhonetics);
-    setImageOverrides(allImageOverrides);
-
-    const ankiCardsFromDb = allFlashcards.filter(isAnkiFlashcard);
-    const ankiWithImages = ankiCardsFromDb.filter(c => c.imageUrl).length;
-
-    console.log('='.repeat(80));
-    console.log('📚 [APP] Flashcards reloaded from database');
-    console.log(`📊 Total flashcards: ${allFlashcards.length}`);
-    console.log(`🎴 Anki cards: ${ankiCardsFromDb.length}`);
-    console.log(`🖼️  Anki cards with images: ${ankiWithImages}`);
-    console.log('='.repeat(80));
-
-    const updatedDeckSummaries = buildDeckSummaries(allFlashcards, ankiDecks);
-    await db.replaceAnkiDeckSummaries(updatedDeckSummaries);
-    setAnkiDecks(updatedDeckSummaries);
-
-    // Switch to flashcards view to see the new deck
-    setView('flashcards');
-
-  }, [settings, ankiDecks]);
-
-  const handleRemoveAnkiDeck = useCallback(async (deckId: string) => {
-    await db.deleteAnkiDeck(deckId);
-    const [allFlashcards, allPhonetics, allImageOverrides] = await Promise.all([
-      db.getFlashcards(),
-      db.getAllPhonetics(),
-      db.getAllImageOverrides(),
-    ]);
-    const remainingSummaries = ankiDecks.filter(deck => deck.id !== deckId);
-    const updatedDeckSummaries = buildDeckSummaries(allFlashcards, remainingSummaries);
-    await db.replaceAnkiDeckSummaries(updatedDeckSummaries);
-    setUserFlashcards(allFlashcards);
-    setPhoneticCache(allPhonetics);
-    setImageOverrides(allImageOverrides);
-    setAnkiDecks(updatedDeckSummaries);
-  }, [ankiDecks]);
 
 
   const renderView = () => {
@@ -516,29 +349,14 @@ const App: React.FC = () => {
         return (
           <SettingsView
             settings={settings}
-            ankiDecks={ankiDecks}
             onSettingsChange={handleSettingsChange}
-            onRemoveAnkiDeck={handleRemoveAnkiDeck}
             onExportBackup={handleExportData}
             onImportBackup={handleImportBackup}
             onBack={() => setView('conversation')}
           />
         );
       case 'anki':
-        return <AnkiView decks={ankiDeckCards} onImportComplete={handleAnkiImport} onConvertComplete={async (flashcards) => {
-          // Save converted flashcards to database
-          await db.bulkAddFlashcards(flashcards);
-          // Reload flashcards from DB
-          const [allFlashcards, allPhonetics, allImageOverrides] = await Promise.all([
-            db.getFlashcards(),
-            db.getAllPhonetics(),
-            db.getAllImageOverrides(),
-          ]);
-          setUserFlashcards(allFlashcards);
-          setPhoneticCache(allPhonetics);
-          setImageOverrides(allImageOverrides);
-          console.log(`[App] ${flashcards.length} cards converted and saved`);
-        }} settings={settings} onBack={() => setView('conversation')} />;
+        return <AnkiView settings={settings} onBack={() => setView('conversation')} />;
       case 'smartLearn':
         return <SmartLearnView settings={settings} onBack={() => setView('conversation')} />;
       case 'licoes':

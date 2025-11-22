@@ -76,6 +76,8 @@ export interface OpenRouterModelSummary {
     context_length?: number;
     pricing?: Record<string, unknown> | null;
     tags?: string[] | null;
+    provider?: string;
+    isFree?: boolean;
 }
 
 export type PhoneticFormat = 'simplified' | 'ipa';

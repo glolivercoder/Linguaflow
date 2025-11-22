@@ -295,10 +295,59 @@ echo.
 :AFTER_ANKI_IMPORT
 
 REM ========================================
-REM 6. INICIAR FRONTEND (REACT)
+REM 6. INICIAR ANKI_BASIC (PORTA 3002)
 REM ========================================
-echo [6/6] Iniciando Frontend (React)...
+echo [6/7] Iniciando Anki_Basic (Porta 3002)...
 echo.
+
+set "ANKI_BASIC_DIR=%SCRIPT_DIR%anki_basic"
+
+if not exist "%ANKI_BASIC_DIR%" (
+    echo ⚠️  AVISO: Diretório anki_basic não encontrado.
+    echo     O aplicativo Anki não será iniciado.
+    goto AFTER_ANKI_BASIC
+)
+
+pushd "%ANKI_BASIC_DIR%"
+
+if not exist node_modules (
+    echo Instalando dependências do Anki_Basic...
+    call npm install
+    if %errorlevel% neq 0 (
+        echo ❌ Falha ao instalar dependências do Anki_Basic
+        popd
+        goto AFTER_ANKI_BASIC
+    )
+)
+
+echo Iniciando Anki_Basic na porta 3002...
+set PORT=3002
+start "LinguaFlow Anki Basic" cmd /k "set PORT=3002 && npm start"
+
+popd
+
+echo Aguardando Anki_Basic inicializar (8 segundos)...
+timeout /t 8 /nobreak >nul
+
+echo Verificando saúde do Anki_Basic...
+curl -s http://localhost:3002 >nul 2>&1
+if %errorlevel% equ 0 (
+    echo ✅ Anki_Basic respondendo corretamente!
+    echo    Acesse: http://localhost:3002
+) else (
+    echo ⚠️  Anki_Basic pode não estar pronto ainda...
+    echo    Verifique manualmente em: http://localhost:3002
+)
+echo.
+
+:AFTER_ANKI_BASIC
+
+REM ========================================
+REM 7. INICIAR FRONTEND (REACT)
+REM ========================================
+echo [7/7] Iniciando Frontend (React)...
+echo.
+
 
 REM Verificar se node_modules existe
 if not exist node_modules (
@@ -340,6 +389,7 @@ echo    Proxy Gemini:    http://localhost:3100
 echo    Vosk STT/LLM:    http://localhost:8200
 echo    Argos Translate: http://localhost:8100
 echo    Anki Import:     http://localhost:8003
+echo    Anki Basic:      http://localhost:3002
 echo    Frontend:        http://localhost:3001
 echo.
 echo  Para testar pronuncia:
@@ -353,6 +403,7 @@ echo    - Vosk STT/LLM:   Feche a janela "LinguaFlow Vosk STT" ou use Ctrl+C
 echo    - Argos:          Feche a janela "LinguaFlow Argos Service" ou use Ctrl+C
 echo    - Proxy Gemini:   Feche a janela "LinguaFlow Proxy" ou use Ctrl+C
 echo    - Anki Import:    Feche a janela "LinguaFlow Anki Import" ou use Ctrl+C
+echo    - Anki Basic:     Feche a janela "LinguaFlow Anki Basic" ou use Ctrl+C
 echo    - Frontend:       Feche a janela "LinguaFlow Frontend" ou use Ctrl+C
 echo.
 echo  Logs e informacoes:
@@ -360,12 +411,14 @@ echo    - Backend: Janela "LinguaFlow Pronunciation API"
 echo    - Frontend: Janela "LinguaFlow Frontend"
 echo    - API Docs: http://localhost:8000/docs
 echo    - Anki Import: http://localhost:8003/docs
+echo    - Anki Basic: http://localhost:3002
 echo.
 echo  Troubleshooting:
 echo    - Se backend falhar: Execute backend\pronunciation\setup_piper_venv.bat
 echo    - Teste backend: backend\pronunciation\test_piper_integration.py
 echo    - Documentacao: backend\pronunciation\INICIO_RAPIDO.md
 echo    - Para importar baralhos Anki: Acesse http://localhost:8003/docs
+echo    - Para gerenciar baralhos Anki: Clique na aba "Anki" no LinguaFlow
 echo.
 echo Pressione qualquer tecla para sair deste terminal...
 echo (Os servidores continuarao rodando nas outras janelas)
