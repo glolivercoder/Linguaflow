@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Flashcard, Settings, LanguageCode, RawCard } from '../types';
-// getIPA removido para desabilitar transcrição fonética
 import { searchImages } from '../services/pixabayService';
+import { getPhonetics } from '../services/geminiService';
 import { SUPPORTED_LANGUAGES } from '../constants';
 import { SpeakerIcon, ImageIcon, PlusCircleIcon } from './icons';
 import { downloadAndCacheImage, getCachedImageUrl } from '../services/imageCacheService';
@@ -84,14 +84,14 @@ export const FlashcardItem: React.FC<{
 }> = ({ card, settings, isObjectCard, onPickImage, onImageError }) => {
   const [isFlipped, setIsFlipped] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  // Estado de transcrição fonética desabilitado
-  const phoneticText = null;
-  const isLoadingPhonetics = false;
+  const [phoneticText, setPhoneticText] = useState<string>('');
+  const [isLoadingPhonetics, setIsLoadingPhonetics] = useState(false);
   const [displayImageUrl, setDisplayImageUrl] = useState<string | undefined>(card.imageUrl);
 
   useEffect(() => {
     // Reset state when card changes
     setIsFlipped(false);
+    setPhoneticText(''); // Reset phonetic text
     console.log('[FlashcardItem] Card updated:', {
       cardId: card.id,
       imageUrl: card.imageUrl,
@@ -118,6 +118,21 @@ export const FlashcardItem: React.FC<{
     return () => { canceled = true; };
   }, [card.id, card.imageUrl]);
 
+  // Load cached phonetic on mount
+  useEffect(() => {
+    const loadCachedPhonetic = async () => {
+      try {
+        const cached = await db.getPhonetic(card.id);
+        if (cached) {
+          setPhoneticText(cached); // getPhonetic returns string directly
+        }
+      } catch (error) {
+        console.error('[FlashcardItem] Failed to load cached phonetic:', error);
+      }
+    };
+    loadCachedPhonetic();
+  }, [card.id]);
+
 
   const playAudio = useCallback(async (text: string, lang: LanguageCode) => {
     setIsPlaying(true);
@@ -125,10 +140,29 @@ export const FlashcardItem: React.FC<{
     setIsPlaying(false);
   }, [settings.voiceGender]);
 
-  // Função de busca de fonética desabilitada
   const fetchPhonetics = useCallback(async () => {
-    // Não faz nada - funcionalidade desabilitada
-  }, []);
+    if (!card.translatedText || phoneticText || isLoadingPhonetics) return;
+
+    setIsLoadingPhonetics(true);
+    try {
+      const learningLangName = SUPPORTED_LANGUAGES.find(
+        l => l.code === settings.learningLanguage
+      )?.name || 'English (US)';
+      const nativeLangName = SUPPORTED_LANGUAGES.find(
+        l => l.code === settings.nativeLanguage
+      )?.name || 'Português (Brasil)';
+
+      const phonetic = await getPhonetics(card.translatedText, learningLangName, nativeLangName);
+      setPhoneticText(phonetic);
+
+      // Save to database for persistence
+      await db.cachePhonetic(card.id, phonetic);
+    } catch (error) {
+      console.error('[FlashcardItem] Failed to fetch phonetics:', error);
+    } finally {
+      setIsLoadingPhonetics(false);
+    }
+  }, [card.translatedText, card.id, phoneticText, isLoadingPhonetics, settings.learningLanguage, settings.nativeLanguage]);
 
   const handleFlip = () => {
     const nextFlippedState = !isFlipped;
@@ -142,7 +176,7 @@ export const FlashcardItem: React.FC<{
     setIsFlipped(nextFlippedState);
     if (nextFlippedState) { // Flipping to the back
       playAudio(card.translatedText, card.translatedLang);
-      // fetchPhonetics removido para evitar erros
+      fetchPhonetics(); // Re-enabled
     }
   };
 
@@ -152,7 +186,7 @@ export const FlashcardItem: React.FC<{
   const backText = card.translatedText;
   const backLang = card.translatedLang;
 
-  const backPhoneticText = null; // Desabilitado
+  const backPhoneticText = phoneticText; // Use fetched phonetic text
 
   const renderImage = () => {
     if (!displayImageUrl) {
@@ -230,7 +264,16 @@ export const FlashcardItem: React.FC<{
           <div className="flex-grow flex flex-col justify-center">
             <p className="text-xs text-gray-200">{SUPPORTED_LANGUAGES.find(l => l.code === backLang)?.name}</p>
             <p className="text-xl md:text-2xl mt-1 text-white">{backText}</p>
-            {/* Transcrição fonética desabilitada */}
+            {backPhoneticText && (
+              <p className="text-sm text-gray-300 mt-2 italic">
+                {backPhoneticText}
+              </p>
+            )}
+            {isLoadingPhonetics && (
+              <p className="text-xs text-gray-400 mt-2">
+                Carregando fonética...
+              </p>
+            )}
           </div>
           <button
             onClick={(e) => { e.stopPropagation(); playAudio(backText, backLang); }}
